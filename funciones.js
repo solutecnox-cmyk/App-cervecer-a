@@ -326,14 +326,18 @@ function handleProductTypeChange() {
     const type = document.getElementById('product-type').value;
     const priceLabel = document.getElementById('product-price-label');
     const supplierDiv = document.getElementById('product-supplier-div');
+    const safetyDiv = document.getElementById('product-safety-stock-div');
     
     if (type === 'raw') {
         priceLabel.textContent = 'Precio de Compra';
         supplierDiv.classList.remove('hidden');
+        safetyDiv.classList.remove('hidden');
     } else {
         priceLabel.textContent = 'Precio de Venta';
         supplierDiv.classList.add('hidden');
+        safetyDiv.classList.add('hidden');
         document.getElementById('product-supplier').value = '';
+        document.getElementById('product-safety-stock').value = 0;
     }
 }
 
@@ -346,8 +350,9 @@ function saveProduct(event) {
         name: document.getElementById('product-name').value,
         price: parseFloat(document.getElementById('product-price').value),
         supplierId: document.getElementById('product-supplier').value || null,
-        quantity: parseInt(document.getElementById('product-quantity').value),
+        quantity: parseFloat(document.getElementById('product-quantity').value),
         volumePerUnit: parseFloat(document.getElementById('product-volume').value) || 1,
+        safetyStock: parseFloat(document.getElementById('product-safety-stock').value) || 0,
     };
     inventory.push(newProduct);
     saveData();
@@ -387,11 +392,12 @@ function loadInventory() {
         }
 
         if (rawMaterials.length === 0) {
-            tbodyRaw.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
+            tbodyRaw.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
         } else {
             rawMaterials.forEach(product => {
                 const row = tbodyRaw.insertRow();
-                const stockClass = product.quantity < 10 ? 'text-red-600 font-bold' : '';
+                const lowStock = product.safetyStock > 0 && product.quantity <= product.safetyStock;
+                const stockClass = lowStock ? 'text-red-600 font-bold' : '';
                 const supplier = suppliers.find(s => s.id == product.supplierId);
                 const supplierName = supplier ? supplier.name : '<span class="text-gray-400 italic">No asignado</span>';
                 row.innerHTML = `
@@ -399,6 +405,7 @@ function loadInventory() {
                     <td class="p-3 border-b">${product.name}</td>
                     <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
                     <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
+                    <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? product.safetyStock : '-'}</td>
                     <td class="p-3 border-b text-xs">${supplierName}</td>
                     <td class="p-3 border-b">
                         <button onclick="generatePurchaseOrder(${product.id})" class="text-green-600 hover:text-green-800 mr-3" title="Generar Orden de Compra"><i class="fas fa-file-invoice-dollar"></i></button>
@@ -410,6 +417,7 @@ function loadInventory() {
         }
     }
     loadMRP(); // Actualizar barras de MRP cuando cambie el inventario
+    renderNotificationBell();
 }
 
 function deleteProduct(id) {
@@ -1035,6 +1043,7 @@ function loadTanks() {
         div.onclick = () => openTankInfoModal(tank.id);
         container.appendChild(div);
     });
+    renderNotificationBell();
 }
 
 function deleteTank(tankId) {
@@ -1072,6 +1081,7 @@ function runProductionFlow() {
     let weeklyForecastLiters = [0, 0, 0, 0];
     let weeklyProducedLiters = [0, 0, 0, 0];
     let weeklyOverflowBottles = [0, 0, 0, 0];
+    let weeklyOverflowLiters = [0, 0, 0, 0];
 
     finalProducts.forEach(p => {
         demandBarril[p.id] = [0, 0, 0, 0];
@@ -1141,40 +1151,45 @@ function runProductionFlow() {
             let overflowBotellas = 0;
             let detail = "";
             
+            const unitVolume = p.volumePerUnit || 0.33;
+
             if (w < 2) {
                 // Semanas 1 y 2: Canal Barril
                 const demandaL = demandBarril[p.id][w];
+                const demandaBotEquiv = Math.round(demandaL / unitVolume);
                 // Necesitamos cubrir demandaL. Si es > 0, lanzamos lotes
                 const lotesNecesarios = Math.ceil(demandaL / LITROS_POR_LOTE);
                 litrosProducir = lotesNecesarios * LITROS_POR_LOTE;
                 
                 // Lo que sobra de los barriles se envasa
                 const overflowLitros = Math.max(0, litrosProducir - demandaL);
-                overflowBotellas = Math.floor(overflowLitros / (p.volumePerUnit || 0.33));
+                overflowBotellas = Math.floor(overflowLitros / unitVolume);
                 currentBotellas += overflowBotellas;
                 
                 weeklyOverflowBottles[w] += overflowBotellas;
+                weeklyOverflowLiters[w] += overflowLitros;
                 weeklyProducedLiters[w] += litrosProducir;
 
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaL.toFixed(0)}L<br>Overflow: +${overflowBotellas} bot</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaL.toFixed(0)} L / ${demandaBotEquiv} bot<br>Overflow: +${overflowBotellas} bot / ${overflowLitros.toFixed(1)} L</span>`;
             } else {
                 // Semanas 3 y 4: Canal Botellas
                 const demandaB = demandBotellas[p.id][w];
+                const demandaLitros = demandaB * unitVolume;
                 currentBotellas -= demandaB; // Restamos demanda proyectada
                 
                 if (currentBotellas < 0) {
                     // Necesitamos producir
                     const deficitBotellas = Math.abs(currentBotellas);
-                    const deficitLitros = deficitBotellas * (p.volumePerUnit || 0.33);
+                    const deficitLitros = deficitBotellas * unitVolume;
                     const lotesNecesarios = Math.ceil(deficitLitros / LITROS_POR_LOTE);
                     litrosProducir = lotesNecesarios * LITROS_POR_LOTE;
                     
-                    const botellasNuevas = Math.floor(litrosProducir / (p.volumePerUnit || 0.33));
+                    const botellasNuevas = Math.floor(litrosProducir / unitVolume);
                     currentBotellas += botellasNuevas;
                 }
                 
                 weeklyProducedLiters[w] += litrosProducir;
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaB.toFixed(0)} bot<br>Inv. Fin: ${currentBotellas} bot</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaB.toFixed(0)} bot / ${demandaLitros.toFixed(1)} L<br>Inv. Fin: ${currentBotellas} bot / ${(currentBotellas * unitVolume).toFixed(1)} L</span>`;
             }
             
             mpsPlan[p.id][w] = litrosProducir;
@@ -1293,7 +1308,12 @@ function runProductionFlow() {
 
     // 4. Resumen Ejecutivo (KPIs)
     let finalInvTotal = 0;
-    finalProducts.forEach(p => finalInvTotal += invProjectedPT[p.id][3]);
+    let finalInvLiters = 0;
+    finalProducts.forEach(p => {
+        const finalQty = invProjectedPT[p.id][3] || 0;
+        finalInvTotal += finalQty;
+        finalInvLiters += finalQty * (p.volumePerUnit || 0.33);
+    });
 
     if(kpiContainer) {
         kpiContainer.innerHTML = `
@@ -1306,12 +1326,12 @@ function runProductionFlow() {
                 <p class="text-3xl font-black text-blue-600">${Math.round((lotesPorSemana.reduce((a,b)=>a+b,0) / (MAX_TANQUES_SEMANA*4))*100)}%</p>
             </div>
             <div class="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-200 text-center shadow-sm">
-                <p class="text-sm text-amber-800 font-bold mb-1">Botellas Overflow Embotelladas</p>
-                <p class="text-3xl font-black text-amber-600">${weeklyOverflowBottles.reduce((a,b)=>a+b,0)}</p>
+                <p class="text-sm text-amber-800 font-bold mb-1">Overflow embotellado</p>
+                <p class="text-3xl font-black text-amber-600">${weeklyOverflowBottles.reduce((a,b)=>a+b,0)} Bot / ${weeklyOverflowLiters.reduce((a,b)=>a+b,0).toFixed(1)} L</p>
             </div>
             <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
-                <p class="text-sm text-purple-800 font-bold mb-1">Inv. Final PT Proyectado (Bot)</p>
-                <p class="text-3xl font-black text-purple-600">${finalInvTotal}</p>
+                <p class="text-sm text-purple-800 font-bold mb-1">Inv. Final PT Proyectado</p>
+                <p class="text-3xl font-black text-purple-600">${finalInvTotal} Bot / ${finalInvLiters.toFixed(1)} L</p>
             </div>
         `;
     }
@@ -1321,6 +1341,13 @@ function runProductionFlow() {
     const inventoryTable = document.getElementById('production-inventory-table');
 
     if(volumeTable) {
+        const monthlyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4;
+        const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
+        const overflowTotalBottles = weeklyOverflowBottles.reduce((a,b)=>a+b,0);
+        const overflowTotalLiters = weeklyOverflowLiters.reduce((a,b)=>a+b,0);
+        const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
+        const producedTotal = weeklyProducedLiters.reduce((a,b)=>a+b,0);
+
         volumeTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
                 <thead class="bg-[#005B3A] text-white">
@@ -1331,33 +1358,39 @@ function runProductionFlow() {
                         <th class="p-2 border text-center">Semana 3</th>
                         <th class="p-2 border text-center">Semana 4</th>
                         <th class="p-2 border text-center">Total Mes</th>
+                        <th class="p-2 border text-center">%</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
                         ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyBarrilDemand.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${barrilTotal.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Overflow embotellado barril (bot)</td>
                         ${weeklyOverflowBottles.map(v => `<td class="p-2 border text-center">${v}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyOverflowBottles.reduce((a,b)=>a+b,0)}</td>
+                        <td class="p-2 border text-center font-bold">${overflowTotalBottles}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Producción según pronósticos (L)</td>
                         ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyForecastLiters.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${forecastTotal.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">PRODUCCIÓN TOTAL (L)</td>
                         ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyProducedLiters.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${producedTotal.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Capacidad producida en el mes (L)</td>
-                        <td class="p-2 border text-center" colspan="4">${MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4}</td>
-                        <td class="p-2 border text-center font-bold">${MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4}</td>
+                        <td class="p-2 border text-center" colspan="4">${monthlyCapacity}</td>
+                        <td class="p-2 border text-center font-bold">${monthlyCapacity}</td>
+                        <td class="p-2 border text-center font-semibold">100%</td>
                     </tr>
                 </tbody>
             </table>
@@ -1365,6 +1398,10 @@ function runProductionFlow() {
     }
 
     if(demandTable) {
+        const monthlyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4;
+        const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
+        const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
+        const totalDemand = barrilTotal + forecastTotal;
         demandTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
                 <thead class="bg-[#005B3A] text-white">
@@ -1375,23 +1412,27 @@ function runProductionFlow() {
                         <th class="p-2 border text-center">Semana 3</th>
                         <th class="p-2 border text-center">Semana 4</th>
                         <th class="p-2 border text-center">Total Mes</th>
+                        <th class="p-2 border text-center">%</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
                         ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyBarrilDemand.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${barrilTotal.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Pronósticos (L)</td>
                         ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyForecastLiters.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${forecastTotal.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">TOTAL (L)</td>
                         ${weeklyBarrilDemand.map((_,i) => `<td class="p-2 border text-center">${(weeklyBarrilDemand[i] + weeklyForecastLiters[i]).toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${(weeklyBarrilDemand.reduce((a,b)=>a+b,0) + weeklyForecastLiters.reduce((a,b)=>a+b,0)).toFixed(0)}</td>
+                        <td class="p-2 border text-center font-bold">${totalDemand.toFixed(0)}</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((totalDemand / monthlyCapacity) * 100)}%</td>
                     </tr>
                 </tbody>
             </table>
@@ -1546,6 +1587,105 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
+function addDays(dateStr, days) {
+    const date = new Date(`${dateStr}T00:00:00`);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+}
+
+function diffDays(startStr, endStr) {
+    const start = new Date(`${startStr}T00:00:00`);
+    const end = new Date(`${endStr}T00:00:00`);
+    return Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+}
+
+function getAlerts() {
+    const alerts = [];
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+
+    inventory.filter(p => p.type === 'raw').forEach(product => {
+        if (product.safetyStock > 0 && product.quantity <= product.safetyStock) {
+            alerts.push({
+                type: 'Materia Prima',
+                message: `Materia prima "${product.name}" (SKU: ${product.sku}) está en o por debajo del mínimo de alerta (${product.quantity}/${product.safetyStock}).`
+            });
+        }
+    });
+
+    tanks.forEach(tank => {
+        (tank.schedule || []).forEach(schedule => {
+            const prod = inventory.find(p => p.id === schedule.productId);
+            const prodName = prod ? prod.name : 'Producto';
+            const fermentationDays = schedule.fermentationDays != null ? schedule.fermentationDays : 8;
+            const bottlingDays = schedule.bottlingDays != null ? schedule.bottlingDays : 2;
+            const packagingDays = schedule.packagingDays != null ? schedule.packagingDays : 1;
+            const fermentationEnd = schedule.fermentationEnd || addDays(schedule.start, fermentationDays);
+            const bottlingEnd = schedule.bottlingEnd || addDays(fermentationEnd, bottlingDays);
+            const packagingEnd = schedule.packagingEnd || addDays(bottlingEnd, packagingDays);
+
+            if (todayStr > packagingEnd) {
+                alerts.push({
+                    type: 'Proceso',
+                    message: `Proceso de ${prodName} en ${tank.name} ya finalizó (${packagingEnd}). Revisa embazado/empaquetado.`
+                });
+            } else {
+                const daysToPackage = diffDays(todayStr, packagingEnd);
+                if (daysToPackage <= 2) {
+                    alerts.push({
+                        type: 'Proceso',
+                        message: `Proceso de ${prodName} en ${tank.name} finalizará en ${daysToPackage} día(s) (${packagingEnd}).`
+                    });
+                }
+                const daysToFermentation = diffDays(todayStr, fermentationEnd);
+                if (daysToFermentation >= 0 && daysToFermentation <= 1) {
+                    alerts.push({
+                        type: 'Proceso',
+                        message: `Fermentación de ${prodName} en ${tank.name} termina pronto (${fermentationEnd}).`
+                    });
+                }
+            }
+        });
+    });
+
+    return alerts;
+}
+
+function renderNotificationBell() {
+    const count = getAlerts().length;
+    const badge = document.getElementById('notification-bell-count');
+    if (!badge) return;
+    if (count > 0) {
+        badge.textContent = count;
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+}
+
+function openNotificationsModal() {
+    const list = document.getElementById('notifications-list');
+    const alerts = getAlerts();
+    if (!list) return;
+
+    if (alerts.length === 0) {
+        list.innerHTML = `<div class="p-4 bg-green-50 border border-green-200 rounded text-green-700">No hay alertas en este momento.</div>`;
+    } else {
+        list.innerHTML = alerts.map(alert => `
+            <div class="p-4 rounded border ${alert.type === 'Materia Prima' ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-700'}">
+                <div class="font-bold text-sm mb-1">${alert.type}</div>
+                <div class="text-sm">${alert.message}</div>
+            </div>
+        `).join('');
+    }
+
+    document.getElementById('notifications-modal').classList.remove('hidden');
+}
+
+function closeNotificationsModal() {
+    document.getElementById('notifications-modal').classList.add('hidden');
+}
+
 // --- Tank Info Modal ---
 function openTankInfoModal(id) {
     const tank = tanks.find(t => t.id === id);
@@ -1562,8 +1702,13 @@ function openTankInfoModal(id) {
     if (activeSchedule) {
         const prod = inventory.find(p => p.id === activeSchedule.productId);
         const prodName = prod ? prod.name : 'Producto desconocido';
+        const fermentationDays = activeSchedule.fermentationDays != null ? activeSchedule.fermentationDays : 8;
+        const bottlingDays = activeSchedule.bottlingDays != null ? activeSchedule.bottlingDays : 2;
+        const packagingDays = activeSchedule.packagingDays != null ? activeSchedule.packagingDays : 1;
+        const fermentationEnd = activeSchedule.fermentationEnd || addDays(activeSchedule.start, fermentationDays);
+        const bottlingEnd = activeSchedule.bottlingEnd || addDays(fermentationEnd, bottlingDays);
+        const packagingEnd = activeSchedule.packagingEnd || addDays(bottlingEnd, packagingDays);
         
-        // Calcular tiempo
         const startDate = new Date(activeSchedule.start);
         const endDate = new Date(activeSchedule.end);
         const today = new Date();
@@ -1573,12 +1718,15 @@ function openTankInfoModal(id) {
         
         html += `
             <div class="mt-4 p-4 bg-amber-50 rounded-md border border-amber-200">
-                <h3 class="font-bold text-amber-800 text-lg mb-2"><i class="fas fa-flask"></i> Fermentando</h3>
+                <h3 class="font-bold text-amber-800 text-lg mb-2"><i class="fas fa-flask"></i> Proceso en Curso</h3>
                 <p><strong>Producto:</strong> ${prodName}</p>
                 <p><strong>Volumen en Proceso:</strong> ${activeSchedule.qty} L</p>
                 <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
-                <p><strong>Fecha Estimada de Fin:</strong> ${activeSchedule.end}</p>
-                
+                <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
+                <p><strong>Fin Embazado:</strong> ${bottlingEnd} (${bottlingDays} días)</p>
+                <p><strong>Fin Empaquetado:</strong> ${packagingEnd} (${packagingDays} días)</p>
+                <p class="mt-2 font-semibold text-gray-700">Fecha Estimada de Fin Total: ${activeSchedule.end}</p>
+
                 <div class="mt-4 text-sm font-semibold text-amber-700 flex justify-between">
                     <span>Día ${elapsedDays} de ${totalDays}</span>
                     <span>${progress.toFixed(0)}%</span>
@@ -1655,12 +1803,18 @@ function openTankScheduleForm(tankId, isEdit) {
         if (activeSchedule) {
             select.value = activeSchedule.productId;
             document.getElementById('tank-schedule-qty').value = activeSchedule.qty;
+            document.getElementById('tank-schedule-fermentation-days').value = activeSchedule.fermentationDays || 8;
+            document.getElementById('tank-schedule-bottling-days').value = activeSchedule.bottlingDays || 2;
+            document.getElementById('tank-schedule-packaging-days').value = activeSchedule.packagingDays || 1;
             document.getElementById('tank-schedule-start').value = activeSchedule.start;
             document.getElementById('tank-schedule-end').value = activeSchedule.end;
         }
     } else {
+        document.getElementById('tank-schedule-fermentation-days').value = 8;
+        document.getElementById('tank-schedule-bottling-days').value = 2;
+        document.getElementById('tank-schedule-packaging-days').value = 1;
         document.getElementById('tank-schedule-start').value = todayStr;
-        suggestTankScheduleEnd(); // Sugerir +8 días
+        suggestTankScheduleEnd(); // Sugerir fecha final con tiempos default
     }
 
     document.getElementById('tank-schedule-modal').classList.remove('hidden');
@@ -1673,9 +1827,13 @@ function closeTankScheduleModal() {
 function suggestTankScheduleEnd() {
     const startInput = document.getElementById('tank-schedule-start').value;
     if (startInput) {
+        const fermentationDays = parseInt(document.getElementById('tank-schedule-fermentation-days').value) || 8;
+        const bottlingDays = parseInt(document.getElementById('tank-schedule-bottling-days').value) || 2;
+        const packagingDays = parseInt(document.getElementById('tank-schedule-packaging-days').value) || 1;
         const endInput = document.getElementById('tank-schedule-end');
-        const startDate = new Date(startInput);
-        startDate.setDate(startDate.getDate() + 8); // 8 días por defecto
+        const startDate = new Date(`${startInput}T00:00:00`);
+        const totalDays = fermentationDays + bottlingDays + packagingDays;
+        startDate.setDate(startDate.getDate() + totalDays);
         endInput.value = startDate.toISOString().slice(0, 10);
     }
 }
@@ -1689,6 +1847,9 @@ function saveTankSchedule(event) {
     const qty = parseFloat(document.getElementById('tank-schedule-qty').value);
     const start = document.getElementById('tank-schedule-start').value;
     const end = document.getElementById('tank-schedule-end').value;
+    const fermentationDays = parseInt(document.getElementById('tank-schedule-fermentation-days').value) || 8;
+    const bottlingDays = parseInt(document.getElementById('tank-schedule-bottling-days').value) || 2;
+    const packagingDays = parseInt(document.getElementById('tank-schedule-packaging-days').value) || 1;
 
     const tank = tanks.find(t => t.id === tankId);
     if (!tank) return;
@@ -1701,16 +1862,33 @@ function saveTankSchedule(event) {
         return showNotification('La fecha de fin debe ser posterior a la fecha de inicio.', 'error');
     }
 
+    const fermentationEnd = addDays(start, fermentationDays);
+    const bottlingEnd = addDays(fermentationEnd, bottlingDays);
+    const packagingEnd = addDays(bottlingEnd, packagingDays);
+
     tank.schedule = tank.schedule || [];
+
+    const scheduleEntry = {
+        start,
+        end,
+        productId,
+        qty,
+        fermentationDays,
+        bottlingDays,
+        packagingDays,
+        fermentationEnd,
+        bottlingEnd,
+        packagingEnd
+    };
 
     if (isEdit) {
         const todayStr = new Date().toISOString().slice(0, 10);
         const idx = tank.schedule.findIndex(s => s.start <= todayStr && s.end >= todayStr);
         if (idx !== -1) {
-            tank.schedule[idx] = { start, end, productId, qty };
+            tank.schedule[idx] = scheduleEntry;
         }
     } else {
-        tank.schedule.push({ start, end, productId, qty });
+        tank.schedule.push(scheduleEntry);
     }
 
     saveData();
@@ -1869,15 +2047,24 @@ function wizardStartProduction() {
 
     // Ocupar tanque
     const today = new Date();
+    const fermentationDays = 8;
+    const bottlingDays = 2;
+    const packagingDays = 1;
     const endDate = new Date(today);
-    endDate.setDate(today.getDate() + 8); // Estimación 8 días
+    endDate.setDate(today.getDate() + fermentationDays + bottlingDays + packagingDays);
     
     tank.schedule = tank.schedule || [];
     tank.schedule.push({
         start: today.toISOString().slice(0, 10),
         end: endDate.toISOString().slice(0, 10),
         productId: prodId,
-        qty: qty
+        qty: qty,
+        fermentationDays,
+        bottlingDays,
+        packagingDays,
+        fermentationEnd: addDays(today.toISOString().slice(0, 10), fermentationDays),
+        bottlingEnd: addDays(addDays(today.toISOString().slice(0, 10), fermentationDays), bottlingDays),
+        packagingEnd: endDate.toISOString().slice(0, 10)
     });
 
     saveData();
