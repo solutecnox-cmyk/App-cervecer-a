@@ -69,7 +69,13 @@
 
         <!-- Main Content -->
         <main class="flex-1 p-8 overflow-y-auto">
-            
+            <div class="flex justify-end mb-6">
+                <button id="notification-bell" onclick="openNotificationsModal()" class="relative inline-flex items-center px-4 py-2 rounded-full bg-yellow-500 text-white hover:bg-yellow-600 transition-colors shadow">
+                    <i class="fas fa-bell"></i>
+                    <span class="ml-2 hidden sm:inline">Alertas</span>
+                    <span id="notification-bell-count" class="absolute top-0 right-0 -mt-1 -mr-1 inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full hidden">0</span>
+                </button>
+            </div>
 
 
             <!-- Sección de Inventario -->
@@ -114,6 +120,7 @@
                                         <th class="p-3">Nombre</th>
                                         <th class="p-3">Precio Compra</th>
                                         <th class="p-3">Stock</th>
+                                        <th class="p-3">Mín. Alerta</th>
                                         <th class="p-3">Proveedor</th>
                                         <th class="p-3">Acciones</th>
                                     </tr>
@@ -374,11 +381,31 @@
                     <label class="block text-gray-700">Cantidad Inicial</label>
                     <input type="number" id="product-quantity" required class="w-full p-2 border border-gray-300 rounded-md">
                 </div>
+                <div class="mb-4 hidden" id="product-safety-stock-div">
+                    <label class="block text-gray-700">Cantidad mínima para alerta</label>
+                    <input type="number" id="product-safety-stock" step="0.01" value="0" class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
                 <div class="flex justify-end gap-2">
                     <button type="button" onclick="closeProductModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button>
                     <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal de Notificaciones -->
+    <div id="notifications-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">Alertas y Notificaciones</h2>
+                <button onclick="closeNotificationsModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div id="notifications-list" class="space-y-3">
+                <!-- Alertas dinámicas -->
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeNotificationsModal()" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Cerrar</button>
+            </div>
         </div>
     </div>
 
@@ -582,6 +609,20 @@
                 <div class="mb-4">
                     <label class="block text-gray-700">Volumen (Litros)</label>
                     <input type="number" id="tank-schedule-qty" required step="0.01" class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="mb-4">
+                        <label class="block text-gray-700">Días Fermentación</label>
+                        <input type="number" id="tank-schedule-fermentation-days" required step="1" min="1" value="8" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700">Días Embazado</label>
+                        <input type="number" id="tank-schedule-bottling-days" required step="1" min="0" value="2" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700">Días Empaquetado</label>
+                        <input type="number" id="tank-schedule-packaging-days" required step="1" min="0" value="1" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div class="mb-4">
