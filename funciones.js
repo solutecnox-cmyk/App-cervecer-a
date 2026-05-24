@@ -2229,18 +2229,20 @@ function wizardCheckIngredients() {
     let allAvailable = true;
     let html = '<ul class="space-y-1 text-sm">';
     const product = inventory.find(p => p.id === prodId);
-    const totalUnits = product && product.volumePerUnit ? (qty / product.volumePerUnit) : qty;
+    const totalVolume = qty; // La receta se define por unidad de volumen (L)
+    const totalUnits = product && product.volumePerUnit ? (qty / product.volumePerUnit) : null;
 
     recipe.ingredients.forEach(ing => {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
         if (raw) {
-            const reqQty = ing.qtyPerUnit * totalUnits;
+            const reqQty = ing.qtyPerUnit * totalVolume;
             const hasEnough = raw.quantity >= reqQty;
             if (!hasEnough) allAvailable = false;
             
+            const extraInfo = totalUnits !== null && raw.type !== 'raw' ? ` (${formatDecimal(totalUnits)} unidades)` : '';
             html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'}">
                 <i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
-                ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})
+                ${raw.name}: Req. ${formatDecimal(reqQty)}${extraInfo} (Stock: ${formatDecimal(raw.quantity)})
             </li>`;
         }
     });
