@@ -14,6 +14,12 @@ function formatDecimal(value, digits = 8) {
     if (!Number.isFinite(num)) return '0';
     return num.toFixed(digits).replace(/\.0+$/, '').replace(/(\.[0-9]*?)0+$/, '$1');
 }
+function getLocalDateStr(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
 let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
@@ -107,6 +113,10 @@ let customWeeklyOverflowLiters = savedState.customWeeklyOverflowLiters || [0, 0,
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
+    // Si la base de datos local está vacía, inicializar con datos de ejemplo
+    if (inventory.length === 0) {
+        seedSampleData();
+    }
     loadClients();
     loadSuppliers();
     loadInventory();
@@ -128,6 +138,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showSection('produccion');
     switchProductionTab('semanal');
 });
+
+function confirmResetSampleData() {
+    if (confirm('¿Estás seguro de que deseas cargar los datos de ejemplo? Esto reemplazará los datos actuales de inventario, recetas, proveedores, clientes, tanques y órdenes.')) {
+        seedSampleData();
+        refreshAppUI();
+    }
+}
 
 // --- Semilla de Datos de Ejemplo (Cervecería B&E) ---
 function seedSampleData() {
@@ -174,16 +191,16 @@ function seedSampleData() {
         { id: 2, name: 'Bodega Frío', location: 'Sótano' }
     ];
     batches = [
-        { id: 1, productId: 201, warehouseId: 1, lot: 'L-001', quantity: 20, manufactureDate: new Date().toISOString().slice(0,10), createdAt: new Date().toISOString() },
-        { id: 2, productId: 202, warehouseId: 2, lot: 'L-002', quantity: 30, manufactureDate: new Date().toISOString().slice(0,10), createdAt: new Date().toISOString() }
+        { id: 1, productId: 201, warehouseId: 1, lot: 'L-001', quantity: 20, manufactureDate: getLocalDateStr(), createdAt: new Date().toISOString() },
+        { id: 2, productId: 202, warehouseId: 2, lot: 'L-002', quantity: 30, manufactureDate: getLocalDateStr(), createdAt: new Date().toISOString() }
     ];
 
     // 6. Producción (Órdenes, Pronósticos y Tanques)
     orders = [
-        { id: 1, productId: 201, qty: 10, dueDate: new Date().toISOString().slice(0,10), createdAt: new Date().toISOString() }
+        { id: 1, productId: 201, qty: 10, dueDate: getLocalDateStr(), createdAt: new Date().toISOString() }
     ];
     forecasts = [
-        { id: 1, productId: 203, qty: 50, targetDate: new Date().toISOString().slice(0,10) }
+        { id: 1, productId: 203, qty: 50, targetDate: getLocalDateStr() }
     ];
     const hoy = new Date();
     const inicio = new Date(hoy);
@@ -197,8 +214,8 @@ function seedSampleData() {
             name: 'Tanque Fermentador 1', 
             capacityLiters: 1000, 
             schedule: [{
-                start: inicio.toISOString().slice(0, 10),
-                end: fin.toISOString().slice(0, 10),
+                start: getLocalDateStr(inicio),
+                end: getLocalDateStr(fin),
                 productId: 201, // IPA Pijao
                 qty: 800
             }] 
@@ -816,7 +833,7 @@ function createBatchFromUI() {
     const warehouseId = parseInt(document.getElementById('batch-warehouse-select').value);
     const lot = document.getElementById('batch-lot').value.trim() || `L-${Date.now()}`;
     const qty = parseInt(document.getElementById('batch-qty').value) || 0;
-    const manufactureDate = document.getElementById('batch-manufacture-date').value || new Date().toISOString().slice(0,10);
+    const manufactureDate = document.getElementById('batch-manufacture-date').value || getLocalDateStr();
     if (!productId || !warehouseId || qty <= 0) {
         showNotification('Completa producto, bodega y cantidad.', 'error');
         return;
@@ -889,7 +906,7 @@ function updateForecastProductSelect() {
 function addOrderFromUI() {
     const productId = parseInt(document.getElementById('order-product-select').value);
     const qty = parseFloat(document.getElementById('order-qty').value) || 0;
-    const date = document.getElementById('order-date').value || new Date().toISOString().slice(0,10);
+    const date = document.getElementById('order-date').value || getLocalDateStr();
     if (!productId || qty <= 0) return showNotification('Completa producto y cantidad para el pedido.', 'error');
     orders.push({ id: Date.now(), productId, qty, dueDate: date, createdAt: new Date().toISOString() });
     saveData();
@@ -900,7 +917,7 @@ function addOrderFromUI() {
 function addForecastFromUI() {
     const productId = parseInt(document.getElementById('order-product-select').value);
     const qty = parseFloat(document.getElementById('order-qty').value) || 0;
-    const targetDate = document.getElementById('order-date').value || new Date().toISOString().slice(0,10);
+    const targetDate = document.getElementById('order-date').value || getLocalDateStr();
     if (!productId || qty <= 0) return showNotification('Completa producto y cantidad para el pronóstico.', 'error');
     forecasts.push({ id: Date.now(), productId, qty, targetDate });
     saveData();
@@ -1184,21 +1201,27 @@ function loadTanks() {
         return;
     }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
 
     tanks.forEach(tank => {
         let statusBgColor = 'bg-[#005B3A]';
         let statusText = 'Libre';
 
-        // Check active schedule
+        // Check active schedule (started and not yet finalized)
         const activeSchedule = (tank.schedule || []).find(s => {
-            return s.start <= todayStr && s.end >= todayStr;
+            return s.start <= todayStr;
         });
 
         if (activeSchedule) {
             const prod = inventory.find(p => p.id === activeSchedule.productId);
-            statusBgColor = 'bg-amber-500';
-            statusText = `Fermentando:<br>${prod ? prod.name : 'Prod.'}`;
+            const isOverdue = todayStr > activeSchedule.end;
+            if (isOverdue) {
+                statusBgColor = 'bg-green-600';
+                statusText = `Listo:<br>${prod ? prod.name : 'Prod.'}`;
+            } else {
+                statusBgColor = 'bg-amber-500';
+                statusText = `Fermentando:<br>${prod ? prod.name : 'Prod.'}`;
+            }
         }
 
         const div = document.createElement('div');
@@ -1231,7 +1254,7 @@ function loadTanks() {
             <div class="absolute top-full mt-1 hidden group-hover:block w-48 p-2 bg-white border border-gray-300 shadow-lg rounded text-xs z-50 text-center">
                 <div class="font-bold border-b pb-1 mb-1">${tank.name}</div>
                 <div>Capacidad: ${tank.capacityLiters}L</div>
-                ${activeSchedule ? `<div class="text-amber-600 mt-1">Fin: ${activeSchedule.end}</div>` : ''}
+                ${activeSchedule ? `<div class="${todayStr > activeSchedule.end ? 'text-green-600 font-bold' : 'text-amber-600'} mt-1">${todayStr > activeSchedule.end ? 'Listo para Finalizar' : `Fin: ${activeSchedule.end}`}</div>` : ''}
             </div>
         `;
         div.onclick = () => openTankInfoModal(tank.id);
@@ -1250,7 +1273,7 @@ function deleteTank(tankId) {
 }
 
 function hasActiveProduction() {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     const hasTanksActive = tanks.some(t => (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr));
     return hasTanksActive || productionHistory.length > 0;
 }
@@ -2045,7 +2068,7 @@ function showNotification(message, type = 'info') {
 function addDays(dateStr, days) {
     const date = new Date(`${dateStr}T00:00:00`);
     date.setDate(date.getDate() + days);
-    return date.toISOString().slice(0, 10);
+    return getLocalDateStr(date);
 }
 
 function diffDays(startStr, endStr) {
@@ -2056,8 +2079,7 @@ function diffDays(startStr, endStr) {
 
 function getAlerts() {
     const alerts = [];
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
 
     inventory.filter(p => p.type === 'raw').forEach(product => {
         if (product.safetyStock > 0 && product.quantity <= product.safetyStock) {
@@ -2149,8 +2171,8 @@ function openTankInfoModal(id) {
     document.getElementById('tank-info-title').textContent = `Tanque: ${tank.name}`;
     const content = document.getElementById('tank-info-content');
     
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr && s.end >= todayStr);
+    const todayStr = getLocalDateStr();
+    const activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr);
 
     let html = `<p class="text-lg"><strong>Capacidad Total:</strong> ${tank.capacityLiters} L</p>`;
 
@@ -2164,16 +2186,17 @@ function openTankInfoModal(id) {
         const bottlingEnd = activeSchedule.bottlingEnd || addDays(fermentationEnd, bottlingDays);
         const packagingEnd = activeSchedule.packagingEnd || addDays(bottlingEnd, packagingDays);
         
-        const startDate = new Date(activeSchedule.start);
-        const endDate = new Date(activeSchedule.end);
+        const startDate = new Date(`${activeSchedule.start}T00:00:00`);
+        const endDate = new Date(`${activeSchedule.end}T00:00:00`);
         const today = new Date();
         const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
         const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
         const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
         
+        const isOverdue = todayStr > activeSchedule.end;
         html += `
-            <div class="mt-4 p-4 bg-amber-50 rounded-md border border-amber-200">
-                <h3 class="font-bold text-amber-800 text-lg mb-2"><i class="fas fa-flask"></i> Proceso en Curso</h3>
+            <div class="mt-4 p-4 ${isOverdue ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'} rounded-md border">
+                <h3 class="font-bold ${isOverdue ? 'text-green-800' : 'text-amber-800'} text-lg mb-2"><i class="fas fa-flask"></i> ${isOverdue ? 'Proceso Completado' : 'Proceso en Curso'}</h3>
                 <p><strong>Producto:</strong> ${prodName}</p>
                 <p><strong>Volumen en Proceso:</strong> ${activeSchedule.qty} L</p>
                 <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
@@ -2182,12 +2205,12 @@ function openTankInfoModal(id) {
                 <p><strong>Fin Empaquetado:</strong> ${packagingEnd} (${packagingDays} días)</p>
                 <p class="mt-2 font-semibold text-gray-700">Fecha Estimada de Fin Total: ${activeSchedule.end}</p>
 
-                <div class="mt-4 text-sm font-semibold text-amber-700 flex justify-between">
-                    <span>Día ${elapsedDays} de ${totalDays}</span>
+                <div class="mt-4 text-sm font-semibold ${isOverdue ? 'text-green-700' : 'text-amber-700'} flex justify-between">
+                    <span>${isOverdue ? 'Completado' : `Día ${elapsedDays} de ${totalDays}`}</span>
                     <span>${progress.toFixed(0)}%</span>
                 </div>
-                <div class="w-full bg-amber-200 rounded-full h-3 mt-1 overflow-hidden">
-                  <div class="bg-amber-600 h-3 rounded-full transition-all duration-1000" style="width: ${progress}%"></div>
+                <div class="w-full ${isOverdue ? 'bg-green-200' : 'bg-amber-200'} rounded-full h-3 mt-1 overflow-hidden">
+                  <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-3 rounded-full transition-all duration-1000" style="width: ${progress}%"></div>
                 </div>
             </div>
         `;
@@ -2251,7 +2274,7 @@ function openTankScheduleForm(tankId, isEdit) {
         select.appendChild(opt);
     });
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     
     if (isEdit) {
         const activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr && s.end >= todayStr);
@@ -2289,7 +2312,7 @@ function suggestTankScheduleEnd() {
         const startDate = new Date(`${startInput}T00:00:00`);
         const totalDays = fermentationDays + bottlingDays + packagingDays;
         startDate.setDate(startDate.getDate() + totalDays);
-        endInput.value = startDate.toISOString().slice(0, 10);
+        endInput.value = getLocalDateStr(startDate);
     }
 }
 
@@ -2337,8 +2360,8 @@ function saveTankSchedule(event) {
     };
 
     if (isEdit) {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const idx = tank.schedule.findIndex(s => s.start <= todayStr && s.end >= todayStr);
+        const todayStr = getLocalDateStr();
+        const idx = tank.schedule.findIndex(s => s.start <= todayStr);
         if (idx !== -1) {
             tank.schedule[idx] = scheduleEntry;
         }
@@ -2667,7 +2690,7 @@ function updateWeeklyEditTankSelect() {
     const select = document.getElementById('weekly-edit-tank');
     if (!select) return;
     const dateInput = document.getElementById('weekly-edit-date').value;
-    const checkDate = dateInput || new Date().toISOString().slice(0, 10);
+    const checkDate = dateInput || getLocalDateStr();
     
     const currentValue = select.value;
     select.innerHTML = '<option value="">-- Selecciona Tanque --</option>';
@@ -2685,6 +2708,19 @@ function updateWeeklyEditTankSelect() {
         select.appendChild(opt);
     });
     if (currentValue) select.value = currentValue;
+}
+
+function weeklyWeekChanged() {
+    const weekSelect = document.getElementById('weekly-edit-week');
+    const dateInput = document.getElementById('weekly-edit-date');
+    if (!weekSelect || !dateInput) return;
+    const weekVal = weekSelect.value;
+    if (weekVal) {
+        const offset = parseInt(weekVal, 10) - 1; // 1 -> 0, 2 -> 1, etc.
+        dateInput.value = getDateForWeekOffset(offset);
+    }
+    updateWeeklyEditTankSelect();
+    weeklyProductionCheckIngredients();
 }
 
 function resetWeeklyProductionForm() {
@@ -2708,7 +2744,7 @@ function getDateForWeekOffset(offset) {
     const day = date.getDay();
     const diff = date.getDate() - day + (day === 0 ? -6 : 1);
     date.setDate(diff + offset * 7 + 3);
-    return date.toISOString().slice(0, 10);
+    return getLocalDateStr(date);
 }
 
 function openWeeklyProductionHistoryEditor(weekLabel, productId) {
@@ -2739,7 +2775,7 @@ function saveWeeklyProductionEntry() {
     // Calculate endDate from startDate and fermentationDays
     const start = new Date(`${dateInput}T00:00:00`);
     const end = new Date(start.getTime() + fermentationDays * 24 * 60 * 60 * 1000);
-    const endDate = end.toISOString().slice(0, 10);
+    const endDate = getLocalDateStr(end);
 
     const existingIdInput = document.getElementById('weekly-edit-id');
     if (existingIdInput && existingIdInput.value) {
@@ -2953,9 +2989,7 @@ function startWeeklyProductionActive() {
     const bottlingDays = 2;
     const packagingDays = 1;
     const totalDays = fermentationDays + bottlingDays + packagingDays;
-    const start = new Date(`${startDate}T00:00:00`);
-    const end = new Date(start.getTime() + totalDays * 24 * 60 * 60 * 1000);
-    const endDate = end.toISOString().slice(0, 10);
+    const endDate = addDays(startDate, totalDays);
     
     tank.schedule = tank.schedule || [];
     tank.schedule.push({
@@ -2982,9 +3016,9 @@ function updateWizardTankSelect() {
     if (!select) return;
     select.innerHTML = '<option value="">-- Selecciona Tanque Libre --</option>';
     
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     tanks.forEach(t => {
-        const isOccupied = (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr);
+        const isOccupied = (t.schedule || []).some(s => s.start <= todayStr);
         if (!isOccupied) {
             const opt = document.createElement('option');
             opt.value = t.id;
@@ -3125,16 +3159,16 @@ function wizardStartProduction() {
     
     tank.schedule = tank.schedule || [];
     tank.schedule.push({
-        start: today.toISOString().slice(0, 10),
-        end: endDate.toISOString().slice(0, 10),
+        start: getLocalDateStr(today),
+        end: getLocalDateStr(endDate),
         productId: prodId,
         qty: qty,
         fermentationDays,
         bottlingDays,
         packagingDays,
-        fermentationEnd: addDays(today.toISOString().slice(0, 10), fermentationDays),
-        bottlingEnd: addDays(addDays(today.toISOString().slice(0, 10), fermentationDays), bottlingDays),
-        packagingEnd: endDate.toISOString().slice(0, 10)
+        fermentationEnd: addDays(getLocalDateStr(today), fermentationDays),
+        bottlingEnd: addDays(addDays(getLocalDateStr(today), fermentationDays), bottlingDays),
+        packagingEnd: getLocalDateStr(endDate)
     });
 
     saveData();
@@ -3156,38 +3190,46 @@ function renderTrackingActive() {
     if (!container) return;
     container.innerHTML = '';
     
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getLocalDateStr();
     let activeFound = false;
 
     tanks.forEach(tank => {
-        const activeIdx = (tank.schedule || []).findIndex(s => s.start <= todayStr && s.end >= todayStr);
+        const activeIdx = (tank.schedule || []).findIndex(s => s.start <= todayStr);
         if (activeIdx !== -1) {
             activeFound = true;
             const schedule = tank.schedule[activeIdx];
             const prod = inventory.find(p => p.id === schedule.productId);
             
             // Calcular progreso
-            const startDate = new Date(schedule.start);
-            const endDate = new Date(schedule.end);
+            const startDate = new Date(`${schedule.start}T00:00:00`);
+            const endDate = new Date(`${schedule.end}T00:00:00`);
             const today = new Date();
             const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
             const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
             const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
 
+            const isOverdue = todayStr > schedule.end;
+            const statusBadge = isOverdue 
+                ? '<span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded border border-green-300 flex items-center gap-1"><i class="fas fa-check-circle"></i> Listo para Finalizar</span>'
+                : `<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded border border-amber-300 flex items-center gap-1"><i class="fas fa-spinner fa-spin"></i> En Proceso (${progress.toFixed(0)}%)</span>`;
+
             const div = document.createElement('div');
-            div.className = 'p-4 border rounded-lg bg-amber-50 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4';
+            div.className = `p-4 border rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${isOverdue ? 'bg-green-50/50 border-green-200' : 'bg-amber-50 border-amber-200'}`;
             div.innerHTML = `
                 <div class="flex-1">
-                    <h3 class="font-bold text-amber-800 text-lg"><i class="fas fa-flask mr-2"></i> ${tank.name}</h3>
+                    <div class="flex items-center gap-2 mb-1">
+                        <h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-flask mr-2 ${isOverdue ? 'text-green-600' : 'text-amber-500'}"></i> ${tank.name}</h3>
+                        ${statusBadge}
+                    </div>
                     <p class="text-sm font-semibold text-gray-700">Producto: <span class="text-black">${prod ? prod.name : 'Desc.'}</span> (${schedule.qty} L)</p>
                     <p class="text-xs text-gray-600">Desde: ${schedule.start} | Estimado Fin: ${schedule.end}</p>
                     
-                    <div class="mt-2 text-xs font-bold text-amber-700 flex justify-between">
+                    <div class="mt-2 text-xs font-bold text-gray-700 flex justify-between">
                         <span>Progreso (${elapsedDays} de ${totalDays} días)</span>
                         <span>${progress.toFixed(0)}%</span>
                     </div>
-                    <div class="w-full bg-amber-200 rounded-full h-2 mt-1">
-                      <div class="bg-amber-600 h-2 rounded-full" style="width: ${progress}%"></div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-1 overflow-hidden">
+                      <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-2 rounded-full" style="width: ${progress}%"></div>
                     </div>
                 </div>
                 <div class="flex-shrink-0">
@@ -3230,7 +3272,7 @@ function finishProduction(tankId, scheduleIdx) {
         warehouseId: defaultWarehouse.id,
         lot: `L-${Date.now().toString().slice(-6)}`,
         qty: qtyToAdd,
-        manufactureDate: new Date().toISOString().slice(0, 10)
+        manufactureDate: getLocalDateStr()
     });
     
     // Añadir al historial
@@ -3240,7 +3282,7 @@ function finishProduction(tankId, scheduleIdx) {
         qtyLiters: schedule.qty,
         qtyUnits: qtyToAdd,
         startDate: schedule.start,
-        endDate: new Date().toISOString().slice(0, 10),
+        endDate: getLocalDateStr(),
         tankName: tank.name
     });
     
