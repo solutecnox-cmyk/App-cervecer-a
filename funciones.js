@@ -744,20 +744,21 @@ function openRecipeModal(recipeProductId = null) {
     document.getElementById('recipe-ingredients-container').innerHTML = '';
     document.getElementById('recipe-modal-title').textContent = 'Definir Receta (BOM)';
 
-    // Poblar select de producto final
-    const select = document.getElementById('recipe-product-select');
-    select.innerHTML = '<option value="">-- Selecciona producto final --</option>';
+    // Poblar datalist de producto final (permite escribir un nombre nuevo o elegir existente)
+    const input = document.getElementById('recipe-product-input');
+    const datalist = document.getElementById('recipe-product-list');
+    datalist.innerHTML = '';
     const finalProducts = inventory.filter(p => p.type !== 'raw');
     finalProducts.forEach(p => {
         const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = `${p.name} (SKU: ${p.sku})`;
-        select.appendChild(opt);
+        opt.value = p.name;
+        datalist.appendChild(opt);
     });
 
     if (recipeProductId) {
         const recipe = recipes.find(r => r.productId === recipeProductId);
-        select.value = recipeProductId;
+        const prod = inventory.find(p => p.id === recipeProductId);
+        input.value = prod ? prod.name : '';
         if (recipe && recipe.ingredients.length > 0) {
             recipe.ingredients.forEach(ingredient => {
                 addIngredientRow();
@@ -771,6 +772,7 @@ function openRecipeModal(recipeProductId = null) {
         editingRecipeProductId = recipeProductId;
         document.getElementById('recipe-modal-title').textContent = 'Editar Receta';
     } else {
+        input.value = '';
         addIngredientRow(); // Añadir una fila por defecto
     }
 
@@ -871,8 +873,38 @@ function addIngredientRow() {
 
 function saveRecipe(event) {
     event.preventDefault();
-    const productId = parseInt(document.getElementById('recipe-product-select').value);
-    if (!productId) return showNotification('Selecciona un producto final.', 'error');
+    const productName = document.getElementById('recipe-product-input').value.trim();
+    if (!productName) return showNotification('Ingresa o selecciona un producto final.', 'error');
+
+    // Buscar producto existente por nombre (case-insensitive)
+    let prod = inventory.find(p => p.name.toLowerCase() === productName.toLowerCase());
+    let productId;
+    if (prod) {
+        productId = prod.id;
+    } else {
+        // Crear nuevo producto final mínimo si no existe
+        const newProd = {
+            id: Date.now(),
+            type: 'final',
+            sku: 'PT-' + Date.now().toString().slice(-6),
+            name: productName,
+            price: 0,
+            supplierId: null,
+            quantity: 0,
+            volumePerUnit: 0.33,
+            unitType: 'und',
+            safetyStock: 0
+        };
+        inventory.push(newProd);
+        saveData();
+        loadInventory();
+        updateBatchProductSelect();
+        updateOrderProductSelect();
+        updateForecastProductSelect();
+        prod = newProd;
+        productId = newProd.id;
+        showNotification('Producto final creado automáticamente: ' + newProd.name, 'success');
+    }
 
     const ingredientRows = document.querySelectorAll('.ingredient-row');
     const ingredients = [];
