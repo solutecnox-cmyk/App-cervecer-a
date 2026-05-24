@@ -2627,6 +2627,10 @@ function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-fermentation-days').value = '8';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
+    const statusDiv = document.getElementById('weekly-mrp-status');
+    if (statusDiv) {
+        statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>';
+    }
     document.getElementById('weekly-edit-id')?.remove();
     updateWeeklyEditTankSelect();
 }
@@ -2744,14 +2748,165 @@ function editWeeklyProductionEntry(entryId) {
         document.body.appendChild(hidden);
     }
     hidden.value = entry.id;
+    weeklyProductionCheckIngredients();
 }
 
 function deleteWeeklyProductionEntry(entryId) {
     if (!confirm('¿Eliminar este registro de producción? Esta acción no se puede deshacer.')) return;
     productionHistory = productionHistory.filter(hist => hist.id !== entryId);
     saveData();
-    renderWeeklyProductionTab();
+    refreshAppUI();
     showNotification('Registro de producción eliminado.', 'success');
+}
+
+function weeklyProductionCheckIngredients() {
+    const prodId = parseInt(document.getElementById('weekly-edit-product').value);
+    const qty = parseFloat(document.getElementById('weekly-edit-liters').value);
+    const statusDiv = document.getElementById('weekly-mrp-status');
+    if (!statusDiv) return false;
+    
+    if (!prodId || isNaN(qty) || qty <= 0) {
+        statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>';
+        return false;
+    }
+
+    const recipe = recipes.find(r => r.productId === prodId);
+    if (!recipe || !recipe.ingredients || recipe.ingredients.length === 0) {
+        statusDiv.innerHTML = '<span class="text-amber-600 font-bold"><i class="fas fa-exclamation-triangle"></i> El producto no tiene receta (BOM) definida. Ve a Configurar Recetas.</span>';
+        return false;
+    }
+
+    let allAvailable = true;
+    let missingItems = [];
+    let html = '<ul class="space-y-1 text-sm">';
+    const product = inventory.find(p => p.id === prodId);
+
+    recipe.ingredients.forEach(ing => {
+        const raw = inventory.find(p => p.id === ing.ingredientProductId);
+        if (raw) {
+            const reqQty = ing.qtyPerUnit * qty;
+            const hasEnough = raw.quantity >= reqQty;
+            if (!hasEnough) {
+                allAvailable = false;
+                missingItems.push({ raw, reqQty });
+            }
+            
+            html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'} flex items-start justify-between gap-2">
+                <span><i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
+                ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})</span>
+                <button type="button" onclick="openEditProductModal(${raw.id}, ${reqQty})" class="text-blue-600 hover:text-blue-800 text-xs font-semibold rounded px-2 py-1 border border-blue-200 bg-blue-50">Editar</button>
+            </li>`;
+        }
+    });
+    if (missingItems.length > 0) {
+        html = `
+            <div class="mb-3">
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Selecciona el ingrediente faltante para revisar o ajustar</label>
+                <div class="flex gap-2 mb-3 flex-wrap">
+                    <select id="weekly-missing-item-select" class="p-2 border border-gray-300 rounded-md flex-1 text-sm bg-white">
+                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
+                    </select>
+                    <button type="button" onclick="openSelectedWeeklyRawItem()" class="px-3 py-2 bg-[#005B3A] text-white rounded-md text-sm hover:bg-[#00422a]">Editar seleccionado</button>
+                </div>
+            </div>
+        ` + html;
+    }
+    html += '</ul>';
+    
+    if (allAvailable) {
+        html = '<div class="text-green-700 font-bold mb-2"><i class="fas fa-check-circle"></i> Hay suficiente materia prima.</div>' + html;
+    } else {
+        html = '<div class="text-red-600 font-bold mb-2"><i class="fas fa-times-circle"></i> Faltan ingredientes. Compra materia prima antes de iniciar.</div>' + html;
+    }
+    
+    statusDiv.innerHTML = html;
+    return allAvailable;
+}
+
+function openSelectedWeeklyRawItem() {
+    const select = document.getElementById('weekly-missing-item-select');
+    if (!select) return;
+    const [idValue, qtyValue] = select.value.split('|');
+    const rawId = parseInt(idValue);
+    const reqQty = qtyValue ? parseFloat(qtyValue) : null;
+    if (!rawId) return;
+    openEditProductModal(rawId, reqQty);
+}
+
+function startWeeklyProductionActive() {
+    const prodId = parseInt(document.getElementById('weekly-edit-product').value);
+    const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
+    const tankName = document.getElementById('weekly-edit-tank').value;
+    const dateInput = document.getElementById('weekly-edit-date').value;
+    const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value) || 8;
+    
+    if (!prodId || isNaN(liters) || liters <= 0 || !dateInput) {
+        return showNotification('Por favor, selecciona producto, fecha y cantidad válida (Litros).', 'error');
+    }
+
+    if (!tankName) {
+        return showNotification('Por favor, selecciona un tanque para iniciar la producción activa.', 'error');
+    }
+
+    // Buscar tanque por nombre
+    const tank = tanks.find(t => t.name === tankName);
+    if (!tank) {
+        return showNotification('Tanque no encontrado.', 'error');
+    }
+
+    // Verificar si el tanque está ocupado en la fecha especificada
+    const isOccupied = (tank.schedule || []).some(s => dateInput >= s.start && dateInput <= s.end);
+    if (isOccupied) {
+        return showNotification(`El tanque ${tank.name} ya está ocupado en la fecha seleccionada.`, 'error');
+    }
+
+    if (liters > tank.capacityLiters) {
+        return showNotification(`La cantidad (${liters}L) supera la capacidad del tanque (${tank.capacityLiters}L).`, 'error');
+    }
+
+    if (!weeklyProductionCheckIngredients()) {
+        return showNotification('Stock insuficiente de materia prima. Revisa la Verificación MRP.', 'error');
+    }
+
+    // Descontar inventario
+    const recipe = recipes.find(r => r.productId === prodId);
+    const product = inventory.find(p => p.id === prodId);
+    const totalUnits = product && product.volumePerUnit ? (liters / product.volumePerUnit) : liters;
+
+    recipe.ingredients.forEach(ing => {
+        const raw = inventory.find(p => p.id === ing.ingredientProductId);
+        if (raw) {
+            raw.quantity -= (ing.qtyPerUnit * totalUnits);
+        }
+    });
+
+    // Calcular fechas
+    const startDate = dateInput;
+    const bottlingDays = 2;
+    const packagingDays = 1;
+    const totalDays = fermentationDays + bottlingDays + packagingDays;
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(start.getTime() + totalDays * 24 * 60 * 60 * 1000);
+    const endDate = end.toISOString().slice(0, 10);
+    
+    tank.schedule = tank.schedule || [];
+    tank.schedule.push({
+        start: startDate,
+        end: endDate,
+        productId: prodId,
+        qty: liters,
+        fermentationDays,
+        bottlingDays,
+        packagingDays,
+        fermentationEnd: addDays(startDate, fermentationDays),
+        bottlingEnd: addDays(addDays(startDate, fermentationDays), bottlingDays),
+        packagingEnd: endDate
+    });
+
+    saveData();
+    refreshAppUI();
+    resetWeeklyProductionForm();
+    showNotification('Producción activa iniciada. Tanque ocupado y materia prima descontada.', 'success');
 }
 
 function updateWizardTankSelect() {
