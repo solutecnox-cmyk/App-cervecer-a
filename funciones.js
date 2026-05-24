@@ -8,6 +8,12 @@ let cart = [];
 let selectedProductId = null; // Para el buscador de productos en POS
 let suppliers = savedState.suppliers || JSON.parse(localStorage.getItem('suppliers')) || [];
 // Nuevas estructuras: bodegas y lotes (batches)
+
+function formatDecimal(value, digits = 8) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '0';
+    return num.toFixed(digits).replace(/\.0+$/, '').replace(/(\.[0-9]*?)0+$/, '$1');
+}
 let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
 let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
@@ -466,9 +472,9 @@ function loadInventory() {
                     <td class="p-3 border-b">${product.sku}</td>
                     <td class="p-3 border-b">${product.name}</td>
                     <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
-                    <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
+                    <td class="p-3 border-b ${stockClass}">${formatDecimal(product.quantity)}</td>
                     <td class="p-3 border-b">${product.unitType || 'und'}</td>
-                    <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? product.safetyStock : '-'}</td>
+                    <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? formatDecimal(product.safetyStock) : '-'}</td>
                     <td class="p-3 border-b text-xs">${supplierName}</td>
                     <td class="p-3 border-b">
                         <button onclick="generatePurchaseOrder(${product.id})" class="text-green-600 hover:text-green-800 mr-3" title="Generar Orden de Compra"><i class="fas fa-file-invoice-dollar"></i></button>
@@ -955,7 +961,7 @@ function addIngredientRow() {
         <select required class="flex-1 p-2 border border-gray-300 rounded-md ingredient-select">
             ${options}
         </select>
-        <input type="number" required step="0.0001" placeholder="Cant. por unidad" class="w-1/3 p-2 border border-gray-300 rounded-md ingredient-qty">
+        <input type="number" required step="0.00000001" placeholder="Cant. por unidad" class="w-1/3 p-2 border border-gray-300 rounded-md ingredient-qty">
         <button type="button" onclick="this.parentElement.remove()" class="text-red-600 hover:text-red-800 p-2"><i class="fas fa-trash"></i></button>
     `;
     container.appendChild(row);
@@ -1409,16 +1415,16 @@ function runProductionFlow() {
             }
 
             cellsHtml += `<td class="p-2 border text-center text-xs">
-                Req: <span class="text-red-600 font-semibold">${reqBruto.toFixed(2)}</span><br>
-                Inv: <span class="text-blue-600 font-semibold">${invProyectado.toFixed(2)}</span>
+                Req: <span class="text-red-600 font-semibold">${formatDecimal(reqBruto)}</span><br>
+                Inv: <span class="text-blue-600 font-semibold">${formatDecimal(invProyectado)}</span>
                 ${aPedirEn}
             </td>`;
             inv = invProyectado;
         }
         
         mrpHtml += `<tr>
-            <td class="p-2 border font-semibold">${rm.name}<br><span class="text-[10px] text-gray-500">SS: ${rm.safetyStock} | Lote: ${rm.purchaseUnit} | LT: ${rm.leadTime} Sem</span></td>
-            <td class="p-2 border text-center bg-gray-50 font-bold">${rm.quantity.toFixed(2)}</td>
+            <td class="p-2 border font-semibold">${rm.name}<br><span class="text-[10px] text-gray-500">SS: ${formatDecimal(rm.safetyStock)} | Lote: ${formatDecimal(rm.purchaseUnit)} | LT: ${formatDecimal(rm.leadTime)} Sem</span></td>
+            <td class="p-2 border text-center bg-gray-50 font-bold">${formatDecimal(rm.quantity)}</td>
             ${cellsHtml}
         </tr>`;
     });
@@ -1446,11 +1452,11 @@ function runProductionFlow() {
             </div>
             <div class="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-200 text-center shadow-sm">
                 <p class="text-sm text-amber-800 font-bold mb-1">Overflow embotellado</p>
-                <p class="text-3xl font-black text-amber-600">${weeklyOverflowBottles.reduce((a,b)=>a+b,0)} Bot / ${weeklyOverflowLiters.reduce((a,b)=>a+b,0).toFixed(1)} L</p>
+                <p class="text-3xl font-black text-amber-600">${formatDecimal(weeklyOverflowBottles.reduce((a,b)=>a+b,0))} Bot / ${formatDecimal(weeklyOverflowLiters.reduce((a,b)=>a+b,0))} L</p>
             </div>
             <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
                 <p class="text-sm text-purple-800 font-bold mb-1">Inv. Final PT Proyectado</p>
-                <p class="text-3xl font-black text-purple-600">${finalInvTotal} Bot / ${finalInvLiters.toFixed(1)} L</p>
+                <p class="text-3xl font-black text-purple-600">${formatDecimal(finalInvTotal)} Bot / ${formatDecimal(finalInvLiters)} L</p>
             </div>
         `;
     }
@@ -1483,26 +1489,26 @@ function runProductionFlow() {
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
-                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${barrilTotal.toFixed(0)}</td>
+                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Overflow embotellado barril (bot)</td>
-                        ${weeklyOverflowBottles.map(v => `<td class="p-2 border text-center">${v}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${overflowTotalBottles}</td>
+                        ${weeklyOverflowBottles.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Producción según pronósticos (L)</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${forecastTotal.toFixed(0)}</td>
+                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">PRODUCCIÓN TOTAL (L)</td>
-                        ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${producedTotal.toFixed(0)}</td>
+                        ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(producedTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
@@ -1537,20 +1543,20 @@ function runProductionFlow() {
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
-                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${barrilTotal.toFixed(0)}</td>
+                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Pronósticos (L)</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${forecastTotal.toFixed(0)}</td>
+                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">TOTAL (L)</td>
-                        ${weeklyBarrilDemand.map((_,i) => `<td class="p-2 border text-center">${(weeklyBarrilDemand[i] + weeklyForecastLiters[i]).toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${totalDemand.toFixed(0)}</td>
+                        ${weeklyBarrilDemand.map((_,i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(totalDemand)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((totalDemand / monthlyCapacity) * 100)}%</td>
                     </tr>
                 </tbody>
@@ -1581,23 +1587,23 @@ function runProductionFlow() {
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pronóstico ventas (botellas)</td>
                         <td class="p-2 border text-center">—</td>
-                        ${weeklyForecastBottles.map(v => `<td class="p-2 border text-center">${v.toFixed(0)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyForecastBottles.reduce((a,b)=>a+b,0).toFixed(0)}</td>
+                        ${weeklyForecastBottles.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastBottles.reduce((a,b)=>a+b,0))}</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Pronóstico ventas (litros)</td>
                         <td class="p-2 border text-center">—</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${v.toFixed(1)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyForecastLiters.reduce((a,b)=>a+b,0).toFixed(1)}</td>
+                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastLiters.reduce((a,b)=>a+b,0))}</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Inventario PT (botellas) al INICIO</td>
-                        <td class="p-2 border text-center font-bold">${startBottles}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(startBottles)}</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${startBottles}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(startBottles)}</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Inventario PT (botellas) al FINAL</td>
@@ -1605,17 +1611,17 @@ function runProductionFlow() {
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${endBottles}</td>
-                        <td class="p-2 border text-center font-bold">${endBottles}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(endBottles)}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(endBottles)}</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Inventario PT (litros) al INICIO</td>
-                        <td class="p-2 border text-center font-bold">${startLiters.toFixed(1)}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(startLiters)}</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${startLiters.toFixed(1)}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(startLiters)}</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Inventario PT (litros) al FINAL</td>
@@ -1623,8 +1629,8 @@ function runProductionFlow() {
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
                         <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${endLiters.toFixed(1)}</td>
-                        <td class="p-2 border text-center font-bold">${endLiters.toFixed(1)}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(endLiters)}</td>
+                        <td class="p-2 border text-center font-bold">${formatDecimal(endLiters)}</td>
                     </tr>
                 </tbody>
             </table>
@@ -1870,8 +1876,8 @@ function openTankInfoModal(id) {
 
             recipe.ingredients.forEach(ing => {
                 const ingProd = inventory.find(p => p.id === ing.ingredientProductId);
-                const reqQty = (ing.qtyPerUnit * totalUnits).toFixed(2);
-                html += `<li><strong>${ingProd ? ingProd.name : 'Ingrediente'}</strong>: ${reqQty}</li>`;
+                const reqQty = ing.qtyPerUnit * totalUnits;
+                html += `<li><strong>${ingProd ? ingProd.name : 'Ingrediente'}</strong>: ${formatDecimal(reqQty)}</li>`;
             });
             html += `</ul></div>`;
         }
@@ -2134,8 +2140,8 @@ function renderWeeklyProductionTab() {
             html += `<tr>
                 <td class="p-2 border">${row.week}</td>
                 <td class="p-2 border">${row.productName}</td>
-                <td class="p-2 border">${row.liters.toFixed(1)}</td>
-                <td class="p-2 border">${row.units.toFixed(0)}</td>
+                <td class="p-2 border">${formatDecimal(row.liters)}</td>
+                <td class="p-2 border">${formatDecimal(row.units)}</td>
             </tr>`;
         });
         html += '</tbody></table>';
@@ -2176,9 +2182,9 @@ function renderWeeklyProductionTab() {
             html += `<tr>
                 <td class="p-2 border">${row.week}</td>
                 <td class="p-2 border">${row.productName}</td>
-                <td class="p-2 border">${row.forecastQty.toFixed(0)}</td>
-                <td class="p-2 border">${row.finishedStock.toFixed(0)}</td>
-                <td class="p-2 border">${row.remainingQty.toFixed(0)}</td>
+                <td class="p-2 border">${formatDecimal(row.forecastQty)}</td>
+                <td class="p-2 border">${formatDecimal(row.finishedStock)}</td>
+                <td class="p-2 border">${formatDecimal(row.remainingQty)}</td>
                 <td class="p-2 border">${row.targetDate}</td>
             </tr>`;
         });
@@ -2234,7 +2240,7 @@ function wizardCheckIngredients() {
             
             html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'}">
                 <i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
-                ${raw.name}: Req. ${reqQty.toFixed(2)} (Stock: ${raw.quantity.toFixed(2)})
+                ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})
             </li>`;
         }
     });
