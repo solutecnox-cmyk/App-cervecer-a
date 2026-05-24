@@ -65,6 +65,11 @@
                     </li>
                 </ul>
             </nav>
+            <div class="mt-8 pt-6 border-t border-[#004b30]">
+                <button onclick="confirmResetSampleData()" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] text-xs text-green-200 hover:text-white transition-colors flex items-center">
+                    <i class="fas fa-database mr-3"></i> Cargar Datos de Ejemplo
+                </button>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -270,7 +275,7 @@
                             </div>
                             <div>
                                 <label class="block text-gray-700 mb-1 font-semibold">Semana (Opcional)</label>
-                                <select id="weekly-edit-week" class="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-[#005B3A]">
+                                <select id="weekly-edit-week" class="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-[#005B3A]" onchange="weeklyWeekChanged()">
                                     <option value="">-- Auto (Por Fecha) --</option>
                                     <option value="1">Semana 1</option>
                                     <option value="2">Semana 2</option>
