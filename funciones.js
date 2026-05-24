@@ -488,7 +488,7 @@ function loadInventory() {
         }
 
         if (rawMaterials.length === 0) {
-            tbodyRaw.innerHTML = '<tr><td colspan="8" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
+            tbodyRaw.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
         } else {
             rawMaterials.forEach(product => {
                 const row = tbodyRaw.insertRow();
@@ -499,7 +499,6 @@ function loadInventory() {
                 row.innerHTML = `
                     <td class="p-3 border-b">${product.sku}</td>
                     <td class="p-3 border-b">${product.name}</td>
-                    <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
                     <td class="p-3 border-b ${stockClass}">${formatDecimal(product.quantity)}</td>
                     <td class="p-3 border-b">${product.unitType || 'und'}</td>
                     <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? formatDecimal(product.safetyStock) : '-'}</td>
@@ -1091,6 +1090,11 @@ function saveTank(event) {
         return showNotification('Ingresa un nombre y capacidad válidos.', 'error');
     }
 
+    const duplicate = tanks.some(t => t.name.toLowerCase() === name.toLowerCase() && t.id !== editingTankId);
+    if (duplicate) {
+        return showNotification('Ya existe un tanque con ese nombre. Por favor, elige otro nombre.', 'error');
+    }
+
     if (editingTankId) {
         const tank = tanks.find(t => t.id === editingTankId);
         if (tank) {
@@ -1378,10 +1382,22 @@ function runProductionFlow() {
         
         mpsHtml += `<tr>
             <td class="p-2 border font-semibold">${p.name}</td>
-            <td class="p-2 border text-center">${pmpDetails[0]}</td>
-            <td class="p-2 border text-center">${pmpDetails[1]}</td>
-            <td class="p-2 border text-center">${pmpDetails[2]}</td>
-            <td class="p-2 border text-center">${pmpDetails[3]}</td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar la demanda de esta semana" onclick="editPlanningDemand(${p.id}, 0)">
+                ${pmpDetails[0]}
+                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Demanda</span>
+            </td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar la demanda de esta semana" onclick="editPlanningDemand(${p.id}, 1)">
+                ${pmpDetails[1]}
+                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Demanda</span>
+            </td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar el pronóstico de esta semana" onclick="editPlanningDemand(${p.id}, 2)">
+                ${pmpDetails[2]}
+                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Pronóstico</span>
+            </td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar el pronóstico de esta semana" onclick="editPlanningDemand(${p.id}, 3)">
+                ${pmpDetails[3]}
+                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Pronóstico</span>
+            </td>
             <td class="p-2 border text-center font-bold">${mpsPlan[p.id].reduce((a,b)=>a+b,0)} L</td>
         </tr>`;
     });
@@ -1693,6 +1709,98 @@ function runProductionFlow() {
     }
 
     out.innerHTML = `<div class="text-green-700 font-bold bg-green-50 p-3 border border-green-200 rounded"><i class="fas fa-check-circle mr-1"></i> Cálculo MRP y MPS finalizado. Validaciones completadas.</div>`;
+}
+
+function editPlanningDemand(productId, weekIndex) {
+    const product = inventory.find(p => p.id === productId);
+    if (!product) return;
+    
+    const isBarril = weekIndex < 2;
+    const title = isBarril 
+        ? `Editar Pedido Fijo (Barril) para ${product.name} en Semana ${weekIndex + 1} (Litros):`
+        : `Editar Pronóstico (Botellas) para ${product.name} en Semana ${weekIndex + 1} (Unidades):`;
+        
+    // Calcular cantidad actual agrupada
+    let currentQty = 0;
+    const today = new Date();
+    
+    if (isBarril) {
+        // Pedidos fijos
+        const weekOrders = orders.filter(o => {
+            if (o.productId !== productId) return false;
+            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
+            const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+            return w === weekIndex;
+        });
+        const volumePerUnit = product.volumePerUnit || 1;
+        const totalUnits = weekOrders.reduce((sum, o) => sum + o.qty, 0);
+        currentQty = totalUnits * volumePerUnit;
+    } else {
+        // Pronósticos
+        const weekForecasts = forecasts.filter(f => {
+            if (f.productId !== productId) return false;
+            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
+            const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+            return w === weekIndex;
+        });
+        currentQty = weekForecasts.reduce((sum, f) => sum + f.qty, 0);
+    }
+    
+    const valInput = prompt(title, currentQty);
+    if (valInput === null || valInput.trim() === "") return;
+    
+    const newQty = parseFloat(valInput);
+    if (isNaN(newQty) || newQty < 0) {
+        return showNotification('Cantidad inválida.', 'error');
+    }
+    
+    // Guardar y Actualizar
+    if (isBarril) {
+        const volumePerUnit = product.volumePerUnit || 1;
+        const newUnits = newQty / volumePerUnit;
+        
+        // Quitar pedidos anteriores de esta semana
+        orders = orders.filter(o => {
+            if (o.productId !== productId) return true;
+            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
+            const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+            return w !== weekIndex;
+        });
+        
+        if (newQty > 0) {
+            const targetDate = getDateForWeekOffset(weekIndex);
+            orders.push({
+                id: Date.now(),
+                productId,
+                qty: newUnits,
+                dueDate: targetDate,
+                createdAt: new Date().toISOString()
+            });
+        }
+    } else {
+        // Quitar pronósticos anteriores de esta semana
+        forecasts = forecasts.filter(f => {
+            if (f.productId !== productId) return true;
+            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
+            const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+            return w !== weekIndex;
+        });
+        
+        if (newQty > 0) {
+            const targetDate = getDateForWeekOffset(weekIndex);
+            forecasts.push({
+                id: Date.now(),
+                productId,
+                qty: newQty,
+                targetDate
+            });
+        }
+    }
+    
+    saveData();
+    refreshAppUI();
+    runProductionFlow();
+    showNotification('Demanda actualizada y plan recalculado con éxito.', 'success');
 }
 
 function createSection(title, text) {
@@ -2227,6 +2335,21 @@ function getWeekLabel(dateStr) {
     }
 }
 
+function getWeekLabelForEntry(hist) {
+    if (hist && hist.week) {
+        const d = new Date(`${hist.endDate || hist.startDate}T00:00:00`);
+        const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+        const monthName = !isNaN(d) ? monthNames[d.getMonth()] : 'Mes';
+        
+        if (weekCalculationMode === 'relative') {
+            return `Semana ${hist.week}`;
+        } else {
+            return `${monthName} - Semana ${hist.week}`;
+        }
+    }
+    return getWeekLabel(hist.endDate || hist.startDate);
+}
+
 function renderWeeklyProductionTab() {
     const productionContainer = document.getElementById('weekly-production-table');
     const forecastContainer = document.getElementById('forecast-adjustment-table');
@@ -2242,7 +2365,7 @@ function renderWeeklyProductionTab() {
 
     const weeklyMap = {};
     productionHistory.forEach(hist => {
-        const week = getWeekLabel(hist.endDate || hist.startDate);
+        const week = getWeekLabelForEntry(hist);
         const key = `${week}|${hist.productId}`;
         const prod = inventory.find(p => p.id === hist.productId) || { name: 'Producto desconocido' };
         if (!weeklyMap[key]) {
@@ -2285,7 +2408,7 @@ function renderWeeklyProductionTab() {
         const product = inventory.find(p => p.id === hist.productId);
         return {
             id: hist.id,
-            week: getWeekLabel(hist.endDate || hist.startDate),
+            week: getWeekLabelForEntry(hist),
             productName: product ? product.name : 'Producto desconocido',
             liters: hist.qtyLiters || 0,
             units: hist.qtyUnits || 0,
@@ -2388,6 +2511,7 @@ function updateWeeklyProductionProductSelect() {
 function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-product').value = '';
     document.getElementById('weekly-edit-date').value = '';
+    document.getElementById('weekly-edit-week').value = '';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
     document.getElementById('weekly-edit-id')?.remove();
@@ -2402,7 +2526,7 @@ function getDateForWeekOffset(offset) {
 }
 
 function openWeeklyProductionHistoryEditor(weekLabel, productId) {
-    const entries = productionHistory.filter(hist => getWeekLabel(hist.endDate || hist.startDate) === weekLabel && hist.productId === productId);
+    const entries = productionHistory.filter(hist => getWeekLabelForEntry(hist) === weekLabel && hist.productId === productId);
     if (!entries.length) return;
     const entry = entries[0];
     editWeeklyProductionEntry(entry.id);
@@ -2411,6 +2535,8 @@ function openWeeklyProductionHistoryEditor(weekLabel, productId) {
 function saveWeeklyProductionEntry() {
     const productId = parseInt(document.getElementById('weekly-edit-product').value);
     const dateInput = document.getElementById('weekly-edit-date').value;
+    const weekSelect = document.getElementById('weekly-edit-week').value;
+    const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
     const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
     const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
     
@@ -2432,6 +2558,7 @@ function saveWeeklyProductionEntry() {
             entry.qtyUnits = qtyUnits;
             entry.startDate = dateInput;
             entry.endDate = dateInput;
+            entry.week = weekVal;
             entry.tankName = entry.tankName || 'Manual';
             saveData();
             refreshAppUI();
@@ -2449,6 +2576,7 @@ function saveWeeklyProductionEntry() {
         qtyUnits,
         startDate: dateInput,
         endDate: dateInput,
+        week: weekVal,
         tankName: 'Manual'
     });
     saveData();
@@ -2463,6 +2591,7 @@ function editWeeklyProductionEntry(entryId) {
     if (!entry) return;
     document.getElementById('weekly-edit-product').value = entry.productId;
     document.getElementById('weekly-edit-date').value = entry.endDate || entry.startDate || '';
+    document.getElementById('weekly-edit-week').value = entry.week || '';
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
 
@@ -2771,6 +2900,17 @@ function deleteActiveProduction(tankId, scheduleIdx) {
     showNotification('Producción cancelada y tanque liberado.', 'info');
 }
 
+function deleteTrackingHistoryEntry(entryId) {
+    if (!confirm('¿Seguro quieres eliminar este registro del historial de producción?')) return;
+    productionHistory = productionHistory.filter(hist => hist.id !== entryId);
+    saveData();
+    renderTrackingHistory();
+    if (document.getElementById('tab-semanal') && !document.getElementById('tab-semanal').classList.contains('hidden')) {
+        renderWeeklyProductionTab();
+    }
+    showNotification('Registro eliminado del historial.', 'success');
+}
+
 function renderTrackingHistory() {
     const container = document.getElementById('tracking-history-list');
     if (!container) return;
@@ -2791,7 +2931,10 @@ function renderTrackingHistory() {
                 <span class="text-gray-500 ml-2">(${hist.qtyLiters}L &rarr; ${hist.qtyUnits} und)</span>
                 <div class="text-xs text-gray-400 mt-1">Tanque: ${hist.tankName} | ${hist.startDate} al ${hist.endDate}</div>
             </div>
-            <span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">Completado</span>
+            <div class="flex items-center gap-2">
+                <span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">Completado</span>
+                <button onclick="deleteTrackingHistoryEntry(${hist.id})" class="text-red-600 hover:text-red-800 p-1" title="Eliminar del historial"><i class="fas fa-trash-alt"></i></button>
+            </div>
         `;
         container.appendChild(div);
     });
