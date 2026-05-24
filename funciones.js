@@ -19,7 +19,77 @@ let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) 
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
 let orders = savedState.orders || JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
 let forecasts = savedState.forecasts || JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
-let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || []; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
+let defaultRecipes = [
+    {
+        "productId": 201,
+        "ingredients": [
+            { "ingredientProductId": 101, "qtyPerUnit": 0.225 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.00496 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000670833 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    },
+    {
+        "productId": 202,
+        "ingredients": [
+            { "ingredientProductId": 101, "qtyPerUnit": 0.217 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.0045 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000670833 },
+            { "ingredientProductId": 107, "qtyPerUnit": 0.045833333 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    },
+    {
+        "productId": 203,
+        "ingredients": [
+            { "ingredientProductId": 102, "qtyPerUnit": 0.2 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.001375 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000575 },
+            { "ingredientProductId": 107, "qtyPerUnit": 0.0375 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    },
+    {
+        "productId": 204,
+        "ingredients": [
+            { "ingredientProductId": 102, "qtyPerUnit": 0.183 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.00138 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000575 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    },
+    {
+        "productId": 205,
+        "ingredients": [
+            { "ingredientProductId": 103, "qtyPerUnit": 0.233 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.001125 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000670833 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    },
+    {
+        "productId": 206,
+        "ingredients": [
+            { "ingredientProductId": 104, "qtyPerUnit": 0.192 },
+            { "ingredientProductId": 105, "qtyPerUnit": 0.001 },
+            { "ingredientProductId": 106, "qtyPerUnit": 0.000575 },
+            { "ingredientProductId": 108, "qtyPerUnit": 3 },
+            { "ingredientProductId": 109, "qtyPerUnit": 3 },
+            { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
+        ]
+    }
+];
+let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || defaultRecipes; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
 let editingRecipeProductId = null;
 let editingTankId = null;
 let editingNewProductId = null; // para modal emergente cuando se crea producto desde receta
@@ -90,21 +160,7 @@ function seedSampleData() {
         { id: 206, type: 'final', sku: 'PT-IRA', name: 'Iris Red Ale', price: 10000, supplierId: null, quantity: 50, volumePerUnit: 0.33 }
     ];
 
-    // 3. Recetas (BOM) en kg/L o und/L
-    const envases = [
-        { ingredientProductId: 108, qtyPerUnit: 3 },
-        { ingredientProductId: 109, qtyPerUnit: 3 },
-        { ingredientProductId: 110, qtyPerUnit: 3.1667 }
-    ];
-
-    recipes = [
-        { productId: 201, ingredients: [{ ingredientProductId: 101, qtyPerUnit: 0.2250 }, { ingredientProductId: 105, qtyPerUnit: 0.00496 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, ...envases] },
-        { productId: 202, ingredients: [{ ingredientProductId: 101, qtyPerUnit: 0.2170 }, { ingredientProductId: 105, qtyPerUnit: 0.00450 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, { ingredientProductId: 107, qtyPerUnit: 0.045833333 }, ...envases] },
-        { productId: 203, ingredients: [{ ingredientProductId: 102, qtyPerUnit: 0.2000 }, { ingredientProductId: 105, qtyPerUnit: 0.001375 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, { ingredientProductId: 107, qtyPerUnit: 0.0375 }, ...envases] },
-        { productId: 204, ingredients: [{ ingredientProductId: 102, qtyPerUnit: 0.1830 }, { ingredientProductId: 105, qtyPerUnit: 0.00138 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, ...envases] },
-        { productId: 205, ingredients: [{ ingredientProductId: 103, qtyPerUnit: 0.2330 }, { ingredientProductId: 105, qtyPerUnit: 0.001125 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, ...envases] },
-        { productId: 206, ingredients: [{ ingredientProductId: 104, qtyPerUnit: 0.1920 }, { ingredientProductId: 105, qtyPerUnit: 0.00100 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, ...envases] }
-    ];
+    recipes = JSON.parse(JSON.stringify(defaultRecipes));
 
     // 4. Clientes (Gastrobares)
     clients = [
@@ -1195,7 +1251,8 @@ function deleteTank(tankId) {
 
 function hasActiveProduction() {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return tanks.some(t => (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr));
+    const hasTanksActive = tanks.some(t => (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr));
+    return hasTanksActive || productionHistory.length > 0;
 }
 
 function renderPlaneacionPlaceholder() {
@@ -1337,6 +1394,17 @@ function runProductionFlow() {
             mpsPlan[hist.productId][wIdx] += hist.qtyLiters || 0;
             weeklyProducedLiters[wIdx] += hist.qtyLiters || 0;
         }
+    });
+
+    // Rellenar también desde las producciones activas programadas en los tanques
+    tanks.forEach(tank => {
+        (tank.schedule || []).forEach(schedule => {
+            const wIdx = getWeekIndexFromDate(schedule.start);
+            if (wIdx >= 0 && wIdx <= 3 && mpsPlan[schedule.productId]) {
+                mpsPlan[schedule.productId][wIdx] += schedule.qty || 0;
+                weeklyProducedLiters[wIdx] += schedule.qty || 0;
+            }
+        });
     });
 
     finalProducts.forEach(p => {
