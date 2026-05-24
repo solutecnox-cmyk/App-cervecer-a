@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateWizardTankSelect();
     renderTrackingActive();
     renderTrackingHistory();
+    showSection('produccion');
+    switchProductionTab('nueva');
 });
 
 // --- Semilla de Datos de Ejemplo (Cervecería B&E) ---
@@ -178,7 +180,7 @@ function saveClient(event) {
     };
     clients.push(newClient);
     saveData();
-    loadClients();
+    refreshAppUI();
     closeClientModal();
     showNotification('Cliente registrado con éxito.');
 }
@@ -237,8 +239,7 @@ function saveSupplier(event) {
     };
     suppliers.push(newSupplier);
     saveData();
-    loadSuppliers();
-    updateProductSupplierSelect();
+    refreshAppUI();
     closeSupplierModal();
     showNotification('Proveedor añadido con éxito.');
 }
@@ -398,7 +399,7 @@ function saveProduct(event) {
         showNotification('Producto añadido al inventario.', 'success');
     }
     saveData();
-    loadInventory();
+    refreshAppUI();
     closeProductModal();
 }
 
@@ -450,10 +451,7 @@ function saveCreatedProductFromModal(event) {
     const supp = document.getElementById('product-created-supplier').value;
     prod.supplierId = supp ? (isNaN(parseInt(supp)) ? null : parseInt(supp)) : null;
     saveData();
-    loadInventory();
-    updateBatchProductSelect();
-    updateOrderProductSelect();
-    updateForecastProductSelect();
+    refreshAppUI();
     closeProductCreatedModal();
     showNotification('Producto actualizado correctamente.', 'success');
 }
@@ -689,8 +687,7 @@ function createWarehouse() {
     const newWh = { id: Date.now(), name, location };
     warehouses.push(newWh);
     saveData();
-    loadWarehouses();
-    updateWarehouseSelect();
+    refreshAppUI();
     document.getElementById('warehouse-name').value = '';
     document.getElementById('warehouse-location').value = '';
     showNotification('Bodega creada.');
@@ -787,9 +784,7 @@ function createBatch({ productId, warehouseId, lot, qty, manufactureDate }) {
         prod.quantity = (prod.quantity || 0) + qty;
     }
     saveData();
-    loadBatches();
-    loadInventory();
-    updateBatchProductSelect();
+    refreshAppUI();
     showNotification('Lote registrado y stock actualizado.', 'success');
 }
 
@@ -837,7 +832,7 @@ function addOrderFromUI() {
     if (!productId || qty <= 0) return showNotification('Completa producto y cantidad para el pedido.', 'error');
     orders.push({ id: Date.now(), productId, qty, dueDate: date, createdAt: new Date().toISOString() });
     saveData();
-    loadOrders();
+    refreshAppUI();
     showNotification('Pedido registrado.', 'success');
 }
 
@@ -848,7 +843,7 @@ function addForecastFromUI() {
     if (!productId || qty <= 0) return showNotification('Completa producto y cantidad para el pronóstico.', 'error');
     forecasts.push({ id: Date.now(), productId, qty, targetDate });
     saveData();
-    loadForecasts();
+    refreshAppUI();
     showNotification('Pronóstico agregado.', 'success');
 }
 
@@ -1052,7 +1047,7 @@ function saveRecipe(event) {
     recipes = recipes.filter(r => r.productId !== productId && r.productId !== editingRecipeProductId);
     recipes.push({ productId, ingredients });
     saveData();
-    loadRecipes();
+    refreshAppUI();
     closeRecipeModal();
     showNotification('Receta guardada con éxito.', 'success');
 }
@@ -1109,7 +1104,7 @@ function saveTank(event) {
     }
 
     saveData();
-    loadTanks();
+    refreshAppUI();
     closeTankModal();
 }
 
@@ -1754,6 +1749,32 @@ function saveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function refreshAppUI() {
+    loadClients();
+    loadSuppliers();
+    loadInventory();
+    loadWarehouses();
+    loadBatches();
+    updateBatchProductSelect();
+    updateWarehouseSelect();
+    loadOrders();
+    loadForecasts();
+    loadRecipes();
+    loadTanks();
+    updateOrderProductSelect();
+    updateForecastProductSelect();
+    updateWizardProductSelect();
+    updateWizardTankSelect();
+    renderTrackingActive();
+    renderTrackingHistory();
+    if (!document.getElementById('tab-planeacion')?.classList.contains('hidden')) {
+        runProductionFlow();
+    }
+    if (!document.getElementById('tab-semanal')?.classList.contains('hidden')) {
+        renderWeeklyProductionTab();
+    }
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
     const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
@@ -2075,8 +2096,7 @@ function saveTankSchedule(event) {
     }
 
     saveData();
-    loadTanks();
-    renderTrackingActive();
+    refreshAppUI();
     closeTankScheduleModal();
     showNotification(isEdit ? 'Lote actualizado correctamente.' : 'Tanque llenado manualmente.', 'success');
 }
