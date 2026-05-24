@@ -28,6 +28,7 @@ let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || [];
 let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
 let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
 let weekCalculationMode = savedState.weekCalculationMode || 'month';
+let customWeeklyCapacities = savedState.customWeeklyCapacities || [720, 720, 720, 720];
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -1409,15 +1410,16 @@ function runProductionFlow() {
     let isOverCapacity = false;
     for(let w=0; w<4; w++) {
         let l = lotesPorSemana[w];
-        let alertClass = l > MAX_TANQUES_SEMANA ? 'text-red-600 font-bold bg-red-100' : 'text-green-600 font-bold';
-        if (l > MAX_TANQUES_SEMANA) isOverCapacity = true;
-        mpsHtml += `<td class="p-2 border text-center ${alertClass}">${l} / ${MAX_TANQUES_SEMANA} Tanques</td>`;
+        const maxTanksThisWeek = customWeeklyCapacities[w] / LITROS_POR_LOTE;
+        let alertClass = l > maxTanksThisWeek ? 'text-red-600 font-bold bg-red-100' : 'text-green-600 font-bold';
+        if (l > maxTanksThisWeek) isOverCapacity = true;
+        mpsHtml += `<td class="p-2 border text-center ${alertClass}">${l} / ${maxTanksThisWeek} Tanques</td>`;
     }
     mpsHtml += `<td class="p-2 border"></td></tr></tbody></table>`;
 
     if (isOverCapacity) {
         mpsHtml = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4 font-bold">
-            <i class="fas fa-exclamation-triangle"></i> ALERTA CRÍTICA: Se ha excedido la capacidad máxima de ${MAX_TANQUES_SEMANA} tanques por semana. Ajusta los pedidos o el pronóstico.
+            <i class="fas fa-exclamation-triangle"></i> ALERTA CRÍTICA: Se ha excedido la capacidad máxima de producción en alguna de las semanas. Ajusta los pedidos o el pronóstico.
         </div>` + mpsHtml;
     }
 
@@ -1514,7 +1516,7 @@ function runProductionFlow() {
             </div>
             <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
                 <p class="text-sm text-blue-800 font-bold mb-1">Uso de Capacidad (S1-S4)</p>
-                <p class="text-3xl font-black text-blue-600">${Math.round((lotesPorSemana.reduce((a,b)=>a+b,0) / (MAX_TANQUES_SEMANA*4))*100)}%</p>
+                <p class="text-3xl font-black text-blue-600">${Math.round((lotesPorSemana.reduce((a, b) => a + b, 0) / (customWeeklyCapacities.reduce((a, b) => a + b, 0) / LITROS_POR_LOTE)) * 100)}%</p>
             </div>
             <div class="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-200 text-center shadow-sm">
                 <p class="text-sm text-amber-800 font-bold mb-1">Overflow embotellado</p>
@@ -1532,14 +1534,12 @@ function runProductionFlow() {
     const inventoryTable = document.getElementById('production-inventory-table');
 
     if(volumeTable) {
-        const monthlyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4;
+        const monthlyCapacity = customWeeklyCapacities.reduce((a, b) => a + b, 0);
         const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
         const overflowTotalBottles = weeklyOverflowBottles.reduce((a,b)=>a+b,0);
         const overflowTotalLiters = weeklyOverflowLiters.reduce((a,b)=>a+b,0);
         const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
         const producedTotal = weeklyProducedLiters.reduce((a,b)=>a+b,0);
-
-        const weeklyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE;
 
         volumeTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
@@ -1559,33 +1559,35 @@ function runProductionFlow() {
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
                         ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Overflow embotellado barril (bot)</td>
                         ${weeklyOverflowBottles.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Producción según pronósticos (L)</td>
                         ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">PRODUCCIÓN TOTAL (L)</td>
                         ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(producedTotal)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Capacidad producida en el mes (L)</td>
-                        <td class="p-2 border text-center">${weeklyCapacity}</td>
-                        <td class="p-2 border text-center">${weeklyCapacity}</td>
-                        <td class="p-2 border text-center">${weeklyCapacity}</td>
-                        <td class="p-2 border text-center">${weeklyCapacity}</td>
-                        <td class="p-2 border text-center font-bold">${monthlyCapacity}</td>
+                        ${[0, 1, 2, 3].map(w => `
+                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar la capacidad de esta semana" onclick="editWeeklyCapacity(${w})">
+                                <span class="font-semibold text-gray-800">${customWeeklyCapacities[w]} L</span>
+                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            </td>
+                        `).join('')}
+                        <td class="p-2 border text-center font-bold">${monthlyCapacity} L</td>
                         <td class="p-2 border text-center font-semibold">100%</td>
                     </tr>
                 </tbody>
@@ -1594,7 +1596,7 @@ function runProductionFlow() {
     }
 
     if(demandTable) {
-        const monthlyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE * 4;
+        const monthlyCapacity = customWeeklyCapacities.reduce((a, b) => a + b, 0);
         const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
         const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
         const totalDemand = barrilTotal + forecastTotal;
@@ -1616,19 +1618,19 @@ function runProductionFlow() {
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
                         ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Pronósticos (L)</td>
                         ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">TOTAL (L)</td>
                         ${weeklyBarrilDemand.map((_,i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(totalDemand)}</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((totalDemand / monthlyCapacity) * 100)}%</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((totalDemand / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                 </tbody>
             </table>
@@ -1803,6 +1805,23 @@ function editPlanningDemand(productId, weekIndex) {
     showNotification('Demanda actualizada y plan recalculado con éxito.', 'success');
 }
 
+function editWeeklyCapacity(weekIndex) {
+    const currentVal = customWeeklyCapacities[weekIndex] || 720;
+    const valInput = prompt(`Ingrese la capacidad de producción para la Semana ${weekIndex + 1} (en Litros):`, currentVal);
+    if (valInput === null || valInput.trim() === "") return;
+    
+    const newVal = parseFloat(valInput);
+    if (isNaN(newVal) || newVal <= 0) {
+        return showNotification('Por favor ingrese un valor numérico válido mayor a 0.', 'error');
+    }
+    
+    customWeeklyCapacities[weekIndex] = newVal;
+    saveData();
+    refreshAppUI();
+    runProductionFlow();
+    showNotification(`Capacidad de la Semana ${weekIndex + 1} actualizada a ${newVal} L`, 'success');
+}
+
 function createSection(title, text) {
     const container = document.createElement('div');
     container.className = 'mb-3';
@@ -1858,7 +1877,8 @@ function saveData() {
         tanks,
         purchaseOrders,
         productionHistory,
-        weekCalculationMode
+        weekCalculationMode,
+        customWeeklyCapacities
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -2362,6 +2382,7 @@ function renderWeeklyProductionTab() {
     }
 
     updateWeeklyProductionProductSelect();
+    updateWeeklyEditTankSelect();
 
     const weeklyMap = {};
     productionHistory.forEach(hist => {
@@ -2406,10 +2427,23 @@ function renderWeeklyProductionTab() {
 
     const weeklyEntries = productionHistory.map(hist => {
         const product = inventory.find(p => p.id === hist.productId);
+        let days = hist.fermentationDays;
+        if (days === undefined) {
+            if (hist.startDate && hist.endDate) {
+                const start = new Date(`${hist.startDate}T00:00:00`);
+                const end = new Date(`${hist.endDate}T00:00:00`);
+                const diffTime = Math.abs(end - start);
+                days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 8;
+            } else {
+                days = 8;
+            }
+        }
         return {
             id: hist.id,
             week: getWeekLabelForEntry(hist),
             productName: product ? product.name : 'Producto desconocido',
+            tankName: hist.tankName || 'Manual',
+            fermentationDays: days,
             liters: hist.qtyLiters || 0,
             units: hist.qtyUnits || 0,
             endDate: hist.endDate || hist.startDate
@@ -2425,6 +2459,8 @@ function renderWeeklyProductionTab() {
                     <tr>
                         <th class="p-2 border">Semana</th>
                         <th class="p-2 border">Producto</th>
+                        <th class="p-2 border">Tanque</th>
+                        <th class="p-2 border">Días Ferm.</th>
                         <th class="p-2 border">Litros</th>
                         <th class="p-2 border">Unidades</th>
                         <th class="p-2 border">Fecha fin</th>
@@ -2436,6 +2472,8 @@ function renderWeeklyProductionTab() {
             html += `<tr>
                 <td class="p-2 border">${entry.week}</td>
                 <td class="p-2 border">${entry.productName}</td>
+                <td class="p-2 border">${entry.tankName}</td>
+                <td class="p-2 border">${entry.fermentationDays} días</td>
                 <td class="p-2 border">${formatDecimal(entry.liters)}</td>
                 <td class="p-2 border">${formatDecimal(entry.units)}</td>
                 <td class="p-2 border">${entry.endDate}</td>
@@ -2508,13 +2546,40 @@ function updateWeeklyProductionProductSelect() {
     if (currentValue) select.value = currentValue;
 }
 
+function updateWeeklyEditTankSelect() {
+    const select = document.getElementById('weekly-edit-tank');
+    if (!select) return;
+    const dateInput = document.getElementById('weekly-edit-date').value;
+    const checkDate = dateInput || new Date().toISOString().slice(0, 10);
+    
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">-- Selecciona Tanque --</option>';
+    
+    tanks.forEach(t => {
+        const isOccupied = (t.schedule || []).some(s => checkDate >= s.start && checkDate <= s.end);
+        const opt = document.createElement('option');
+        opt.value = t.name;
+        opt.textContent = `${t.name} (Capacidad: ${t.capacityLiters} L) - ${isOccupied ? 'Ocupado' : 'Libre'}`;
+        if (isOccupied) {
+            opt.className = 'text-red-600 font-semibold';
+        } else {
+            opt.className = 'text-green-600';
+        }
+        select.appendChild(opt);
+    });
+    if (currentValue) select.value = currentValue;
+}
+
 function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-product').value = '';
     document.getElementById('weekly-edit-date').value = '';
     document.getElementById('weekly-edit-week').value = '';
+    document.getElementById('weekly-edit-tank').value = '';
+    document.getElementById('weekly-edit-fermentation-days').value = '8';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
     document.getElementById('weekly-edit-id')?.remove();
+    updateWeeklyEditTankSelect();
 }
 
 function getDateForWeekOffset(offset) {
@@ -2537,6 +2602,8 @@ function saveWeeklyProductionEntry() {
     const dateInput = document.getElementById('weekly-edit-date').value;
     const weekSelect = document.getElementById('weekly-edit-week').value;
     const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
+    const tankName = document.getElementById('weekly-edit-tank').value || 'Manual';
+    const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value, 10) || 8;
     const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
     const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
     
@@ -2548,6 +2615,11 @@ function saveWeeklyProductionEntry() {
     const unitVolume = product?.volumePerUnit || 0.33;
     const qtyUnits = !isNaN(unitsInput) && unitsInput > 0 ? unitsInput : Math.round(liters / unitVolume);
 
+    // Calculate endDate from startDate and fermentationDays
+    const start = new Date(`${dateInput}T00:00:00`);
+    const end = new Date(start.getTime() + fermentationDays * 24 * 60 * 60 * 1000);
+    const endDate = end.toISOString().slice(0, 10);
+
     const existingIdInput = document.getElementById('weekly-edit-id');
     if (existingIdInput && existingIdInput.value) {
         const entryId = parseInt(existingIdInput.value);
@@ -2557,9 +2629,10 @@ function saveWeeklyProductionEntry() {
             entry.qtyLiters = liters;
             entry.qtyUnits = qtyUnits;
             entry.startDate = dateInput;
-            entry.endDate = dateInput;
+            entry.endDate = endDate;
             entry.week = weekVal;
-            entry.tankName = entry.tankName || 'Manual';
+            entry.tankName = tankName;
+            entry.fermentationDays = fermentationDays;
             saveData();
             refreshAppUI();
             resetWeeklyProductionForm();
@@ -2575,9 +2648,10 @@ function saveWeeklyProductionEntry() {
         qtyLiters: liters,
         qtyUnits,
         startDate: dateInput,
-        endDate: dateInput,
+        endDate: endDate,
         week: weekVal,
-        tankName: 'Manual'
+        tankName: tankName,
+        fermentationDays: fermentationDays
     });
     saveData();
     refreshAppUI();
@@ -2590,10 +2664,28 @@ function editWeeklyProductionEntry(entryId) {
     const entry = productionHistory.find(hist => hist.id === entryId);
     if (!entry) return;
     document.getElementById('weekly-edit-product').value = entry.productId;
-    document.getElementById('weekly-edit-date').value = entry.endDate || entry.startDate || '';
+    document.getElementById('weekly-edit-date').value = entry.startDate || entry.endDate || '';
     document.getElementById('weekly-edit-week').value = entry.week || '';
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
+
+    // Load tank select
+    updateWeeklyEditTankSelect();
+    document.getElementById('weekly-edit-tank').value = entry.tankName || '';
+
+    // Load fermentation days
+    let fermentationDays = entry.fermentationDays;
+    if (fermentationDays === undefined) {
+        if (entry.startDate && entry.endDate) {
+            const start = new Date(`${entry.startDate}T00:00:00`);
+            const end = new Date(`${entry.endDate}T00:00:00`);
+            const diffTime = Math.abs(end - start);
+            fermentationDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 8;
+        } else {
+            fermentationDays = 8;
+        }
+    }
+    document.getElementById('weekly-edit-fermentation-days').value = fermentationDays;
 
     let hidden = document.getElementById('weekly-edit-id');
     if (!hidden) {
