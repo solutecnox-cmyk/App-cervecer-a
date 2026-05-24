@@ -80,11 +80,16 @@
 
             <!-- Sección de Inventario -->
             <section id="inventario" class="section active fade-in">
-                <div class="flex justify-between items-center mb-6">
+                <div class="flex justify-between items-center mb-6 gap-3 flex-wrap">
                     <h1 class="text-3xl font-bold text-gray-700">Gestión de Inventario</h1>
-                    <button onclick="openAddProductModal()" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] transition-colors">
-                        <i class="fas fa-plus-circle"></i> Añadir Producto / Material
-                    </button>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openAddProductModal('final')" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] transition-colors">
+                            <i class="fas fa-plus-circle"></i> Añadir Producto Final
+                        </button>
+                        <button onclick="openAddProductModal('raw')" class="bg-amber-600 text-white px-4 py-2 rounded-md hover:bg-amber-700 transition-colors">
+                            <i class="fas fa-seedling"></i> Añadir Materia Prima
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
@@ -344,15 +349,10 @@
     <!-- Modal para Añadir/Editar Producto -->
     <div id="product-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
         <div class="bg-white p-8 rounded-lg w-full max-w-md">
-            <h2 class="text-2xl font-bold mb-4">Añadir al Inventario</h2>
+            <h2 id="product-modal-title" class="text-2xl font-bold mb-4">Añadir al Inventario</h2>
+            <p id="product-modal-subtitle" class="text-sm text-gray-600 mb-4">Completa los datos del producto o materia prima.</p>
             <form id="product-form" onsubmit="saveProduct(event)">
-                <div class="mb-4">
-                    <label class="block text-gray-700 font-bold mb-1">Categoría</label>
-                    <select id="product-type" required class="w-full p-2 border border-gray-300 rounded-md bg-gray-50" onchange="handleProductTypeChange()">
-                        <option value="final">Producto para Ventas (Cerveza, etc.)</option>
-                        <option value="raw">Materia Prima para Producción (Malta, Botellas, etc.)</option>
-                    </select>
-                </div>
+                <input type="hidden" id="product-type" value="final">
                 <div class="grid grid-cols-2 gap-4">
                     <div class="mb-4">
                         <label class="block text-gray-700">SKU (Código)</label>
@@ -364,7 +364,7 @@
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="mb-4">
+                    <div class="mb-4" id="product-price-div">
                         <label id="product-price-label" class="block text-gray-700 font-bold">Precio de Venta</label>
                         <input type="number" id="product-price" step="0.01" required class="w-full p-2 border border-gray-300 rounded-md">
                     </div>
@@ -375,7 +375,7 @@
                         </select>
                     </div>
                 </div>
-                <div class="mb-4">
+                <div class="mb-4" id="product-volume-div">
                     <label class="block text-gray-700">Volumen por unidad (L)</label>
                     <input type="number" id="product-volume" step="0.01" value="1" required class="w-full p-2 border border-gray-300 rounded-md">
                     <p class="text-xs text-gray-500 italic mt-1">Ej: 0.33 para botella 330 mL — se usa en cálculos de planeación (MPS/MRP).</p>
@@ -421,6 +421,62 @@
             </div>
         </div>
     </div>
+
+            <!-- Modal emergente: Producto creado automáticamente (revisar/editar) -->
+            <div id="product-created-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+                <div class="bg-white p-6 rounded-lg w-full max-w-md">
+                    <h2 class="text-2xl font-bold mb-3">Producto creado automáticamente</h2>
+                    <p class="text-sm text-gray-600 mb-4">Se creó un producto final a partir del nombre de receta. Revisa o completa los datos antes de continuar.</p>
+                    <form id="product-created-form" onsubmit="saveCreatedProductFromModal(event)">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-gray-700">SKU</label>
+                                <input type="text" id="product-created-sku" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Nombre</label>
+                                <input type="text" id="product-created-name" disabled class="w-full p-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Precio</label>
+                                <input type="number" id="product-created-price" step="0.01" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Volumen (L)</label>
+                                <input type="number" id="product-created-volume" step="0.01" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Unidad</label>
+                                <select id="product-created-unit" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="botella">Botella</option>
+                                    <option value="Litro">Litro</option>
+                                    <option value="Mililitro">Mililitro</option>
+                                    <option value="kg">Kilogramo</option>
+                                    <option value="und">Unidad</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Cantidad inicial</label>
+                                <input type="number" id="product-created-quantity" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Proveedor</label>
+                                <select id="product-created-supplier" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="">-- Selecciona proveedor --</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-gray-700">Cantidad mínima (alerta)</label>
+                                <input type="number" id="product-created-safety" step="0.01" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                        </div>
+                        <div class="flex justify-end gap-2 mt-4">
+                            <button type="button" onclick="closeProductCreatedModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button>
+                            <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
 
     <!-- Modal para Añadir/Editar Cliente -->
     <div id="client-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
