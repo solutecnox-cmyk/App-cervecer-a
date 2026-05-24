@@ -469,7 +469,7 @@ function loadInventory() {
         const rawMaterials = inventory.filter(p => p.type === 'raw');
 
         if (finalProducts.length === 0) {
-            tbodyFinal.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay productos finales registrados.</td></tr>';
+            tbodyFinal.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-500">No hay productos finales registrados.</td></tr>';
         } else {
             finalProducts.forEach(product => {
                 const row = tbodyFinal.insertRow();
@@ -477,7 +477,6 @@ function loadInventory() {
                 row.innerHTML = `
                     <td class="p-3 border-b">${product.sku}</td>
                     <td class="p-3 border-b">${product.name}</td>
-                    <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
                     <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
                     <td class="p-3 border-b">${product.unitType || 'und'}</td>
                     <td class="p-3 border-b">
@@ -1524,6 +1523,8 @@ function runProductionFlow() {
         const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
         const producedTotal = weeklyProducedLiters.reduce((a,b)=>a+b,0);
 
+        const weeklyCapacity = MAX_TANQUES_SEMANA * LITROS_POR_LOTE;
+
         volumeTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
                 <thead class="bg-[#005B3A] text-white">
@@ -1564,7 +1565,10 @@ function runProductionFlow() {
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Capacidad producida en el mes (L)</td>
-                        <td class="p-2 border text-center" colspan="4">${monthlyCapacity}</td>
+                        <td class="p-2 border text-center">${weeklyCapacity}</td>
+                        <td class="p-2 border text-center">${weeklyCapacity}</td>
+                        <td class="p-2 border text-center">${weeklyCapacity}</td>
+                        <td class="p-2 border text-center">${weeklyCapacity}</td>
                         <td class="p-2 border text-center font-bold">${monthlyCapacity}</td>
                         <td class="p-2 border text-center font-semibold">100%</td>
                     </tr>
