@@ -2025,19 +2025,23 @@ function saveTankSchedule(event) {
 function switchProductionTab(tabId) {
     const tabNueva = document.getElementById('tab-nueva');
     const tabSeguimiento = document.getElementById('tab-seguimiento');
+    const tabSemanal = document.getElementById('tab-semanal');
     const tabPlaneacion = document.getElementById('tab-planeacion');
     const btnNueva = document.getElementById('tab-btn-nueva');
     const btnSeguimiento = document.getElementById('tab-btn-seguimiento');
+    const btnSemanal = document.getElementById('tab-btn-semanal');
     const btnPlaneacion = document.getElementById('tab-btn-planeacion');
 
     // Hide all
     tabNueva.classList.add('hidden');
     tabSeguimiento.classList.add('hidden');
+    if (tabSemanal) tabSemanal.classList.add('hidden');
     if (tabPlaneacion) tabPlaneacion.classList.add('hidden');
     
     // Reset buttons
     btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     btnSeguimiento.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
+    if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
 
     if (tabId === 'nueva') {
@@ -2051,6 +2055,10 @@ function switchProductionTab(tabId) {
         renderTrackingActive();
         renderTrackingHistory();
         loadTanks();
+    } else if (tabId === 'semanal') {
+        if (tabSemanal) tabSemanal.classList.remove('hidden');
+        if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
+        renderWeeklyProductionTab();
     } else if (tabId === 'planeacion') {
         if (tabPlaneacion) tabPlaneacion.classList.remove('hidden');
         if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
@@ -2077,6 +2085,106 @@ function updateWizardProductSelect() {
         select.appendChild(opt);
     });
     if (currentVal) select.value = currentVal;
+}
+
+function getWeekLabel(dateStr) {
+    const d = new Date(dateStr);
+    if (isNaN(d)) return 'Sin semana';
+    const target = new Date(d.valueOf());
+    const dayNr = (target.getDay() + 6) % 7; // Monday as first day
+    target.setDate(target.getDate() - dayNr + 3);
+    const firstThursday = new Date(target.getFullYear(), 0, 4);
+    const weekNumber = 1 + Math.round(((target - firstThursday) / 86400000 - 3 + ((firstThursday.getDay() + 6) % 7)) / 7);
+    return `${target.getFullYear()}-S${String(weekNumber).padStart(2, '0')}`;
+}
+
+function renderWeeklyProductionTab() {
+    const productionContainer = document.getElementById('weekly-production-table');
+    const forecastContainer = document.getElementById('forecast-adjustment-table');
+    if (!productionContainer || !forecastContainer) return;
+
+    const weeklyMap = {};
+    productionHistory.forEach(hist => {
+        const week = getWeekLabel(hist.endDate || hist.startDate);
+        const key = `${week}|${hist.productId}`;
+        const prod = inventory.find(p => p.id === hist.productId) || { name: 'Producto desconocido' };
+        if (!weeklyMap[key]) {
+            weeklyMap[key] = { week, productId: hist.productId, productName: prod.name, liters: 0, units: 0 };
+        }
+        weeklyMap[key].liters += hist.qtyLiters || 0;
+        weeklyMap[key].units += hist.qtyUnits || 0;
+    });
+
+    const weeklyRows = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week) || a.productName.localeCompare(b.productName));
+
+    if (weeklyRows.length === 0) {
+        productionContainer.innerHTML = '<p class="text-gray-500 italic p-4">No hay producciones terminadas registradas para mostrar por semana.</p>';
+    } else {
+        let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="p-2 border">Semana</th>
+                    <th class="p-2 border">Producto</th>
+                    <th class="p-2 border">Litros terminados</th>
+                    <th class="p-2 border">Unidades terminadas</th>
+                </tr>
+            </thead>
+            <tbody>`;
+        weeklyRows.forEach(row => {
+            html += `<tr>
+                <td class="p-2 border">${row.week}</td>
+                <td class="p-2 border">${row.productName}</td>
+                <td class="p-2 border">${row.liters.toFixed(1)}</td>
+                <td class="p-2 border">${row.units.toFixed(0)}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        productionContainer.innerHTML = html;
+    }
+
+    const forecastsByWeek = forecasts.map(f => {
+        const product = inventory.find(p => p.id === f.productId);
+        const week = getWeekLabel(f.targetDate);
+        const stock = product ? product.quantity || 0 : 0;
+        const remaining = Math.max(0, f.qty - stock);
+        return {
+            week,
+            productName: product ? product.name : 'Producto desconocido',
+            forecastQty: f.qty,
+            finishedStock: stock,
+            remainingQty: remaining,
+            targetDate: f.targetDate
+        };
+    });
+
+    if (forecastsByWeek.length === 0) {
+        forecastContainer.innerHTML = '<p class="text-gray-500 italic p-4">No hay pronósticos registrados para ajustar con el inventario de producto terminado.</p>';
+    } else {
+        let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="p-2 border">Semana</th>
+                    <th class="p-2 border">Producto</th>
+                    <th class="p-2 border">Pronóstico</th>
+                    <th class="p-2 border">Stock PT disponible</th>
+                    <th class="p-2 border">Pronóstico ajustado</th>
+                    <th class="p-2 border">Fecha objetivo</th>
+                </tr>
+            </thead>
+            <tbody>`;
+        forecastsByWeek.forEach(row => {
+            html += `<tr>
+                <td class="p-2 border">${row.week}</td>
+                <td class="p-2 border">${row.productName}</td>
+                <td class="p-2 border">${row.forecastQty.toFixed(0)}</td>
+                <td class="p-2 border">${row.finishedStock.toFixed(0)}</td>
+                <td class="p-2 border">${row.remainingQty.toFixed(0)}</td>
+                <td class="p-2 border">${row.targetDate}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        forecastContainer.innerHTML = html;
+    }
 }
 
 function updateWizardTankSelect() {
