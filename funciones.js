@@ -1,57 +1,27 @@
 // --- Estado de la Aplicación ---
-let clients = JSON.parse(localStorage.getItem('clients')) || [];
-let inventory = JSON.parse(localStorage.getItem('inventory')) || [];
+const STORAGE_KEY = 'erpState';
+const savedState = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+
+let clients = savedState.clients || JSON.parse(localStorage.getItem('clients')) || [];
+let inventory = savedState.inventory || JSON.parse(localStorage.getItem('inventory')) || [];
 let cart = [];
 let selectedProductId = null; // Para el buscador de productos en POS
-let suppliers = JSON.parse(localStorage.getItem('suppliers')) || [];
+let suppliers = savedState.suppliers || JSON.parse(localStorage.getItem('suppliers')) || [];
 // Nuevas estructuras: bodegas y lotes (batches)
-let warehouses = JSON.parse(localStorage.getItem('warehouses')) || [];
-let batches = JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
+let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
+let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
-let orders = JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
-let forecasts = JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
-let recipes = JSON.parse(localStorage.getItem('recipes')) || []; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
+let orders = savedState.orders || JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
+let forecasts = savedState.forecasts || JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
+let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || []; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
 let editingRecipeProductId = null;
 let editingTankId = null;
-let tanks = JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
-let purchaseOrders = JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
-let productionHistory = JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
+let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
+let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
+let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
-    if (inventory.length === 0 || tanks.length === 0) {
-        seedSampleData();
-    }
-    
-    // --- FORCE UPDATE RECIPES TO MATCH NEW IMAGE ---
-    // Update product names in inventory if they exist
-    const p203 = inventory.find(p => p.id === 203);
-    if(p203 && p203.name === 'Saison') p203.name = 'Honey Golden Ale';
-    const p206 = inventory.find(p => p.id === 206);
-    if(p206 && p206.name === 'Irish Red Ale') p206.name = 'Iris Red Ale';
-    
-    // Add Agua if missing
-    if(!inventory.find(p => p.id === 110)) {
-        inventory.push({ id: 110, type: 'raw', sku: 'MP-010', name: 'Agua (L)', price: 0, supplierId: 1, quantity: 10000, safetyStock: 1000, leadTime: 0, purchaseUnit: 1000 });
-    }
-
-    // Force overwrite recipes
-    const envases = [
-        { ingredientProductId: 108, qtyPerUnit: 3 },
-        { ingredientProductId: 109, qtyPerUnit: 3 },
-        { ingredientProductId: 110, qtyPerUnit: 3.1667 }
-    ];
-    recipes = [
-        { productId: 201, ingredients: [{ ingredientProductId: 101, qtyPerUnit: 0.2250 }, { ingredientProductId: 105, qtyPerUnit: 0.00496 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, ...envases] },
-        { productId: 202, ingredients: [{ ingredientProductId: 101, qtyPerUnit: 0.2170 }, { ingredientProductId: 105, qtyPerUnit: 0.00450 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, { ingredientProductId: 107, qtyPerUnit: 0.045833333 }, ...envases] },
-        { productId: 203, ingredients: [{ ingredientProductId: 102, qtyPerUnit: 0.2000 }, { ingredientProductId: 105, qtyPerUnit: 0.001375 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, { ingredientProductId: 107, qtyPerUnit: 0.0375 }, ...envases] },
-        { productId: 204, ingredients: [{ ingredientProductId: 102, qtyPerUnit: 0.1830 }, { ingredientProductId: 105, qtyPerUnit: 0.00138 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, ...envases] },
-        { productId: 205, ingredients: [{ ingredientProductId: 103, qtyPerUnit: 0.2330 }, { ingredientProductId: 105, qtyPerUnit: 0.001125 }, { ingredientProductId: 106, qtyPerUnit: 0.000670833 }, ...envases] },
-        { productId: 206, ingredients: [{ ingredientProductId: 104, qtyPerUnit: 0.1920 }, { ingredientProductId: 105, qtyPerUnit: 0.00100 }, { ingredientProductId: 106, qtyPerUnit: 0.000575 }, ...envases] }
-    ];
-    saveData();
-    // -----------------------------------------------
-
     loadClients();
     loadSuppliers();
     loadInventory();
@@ -1558,17 +1528,20 @@ function allocateFromBatches(productId, qtyNeeded) {
 
 // --- Utilidades ---
 function saveData() {
-    localStorage.setItem('clients', JSON.stringify(clients));
-    localStorage.setItem('suppliers', JSON.stringify(suppliers));
-    localStorage.setItem('inventory', JSON.stringify(inventory));
-    localStorage.setItem('warehouses', JSON.stringify(warehouses));
-    localStorage.setItem('batches', JSON.stringify(batches));
-    localStorage.setItem('orders', JSON.stringify(orders));
-    localStorage.setItem('forecasts', JSON.stringify(forecasts));
-    localStorage.setItem('recipes', JSON.stringify(recipes));
-    localStorage.setItem('tanks', JSON.stringify(tanks));
-    localStorage.setItem('purchaseOrders', JSON.stringify(purchaseOrders));
-    localStorage.setItem('productionHistory', JSON.stringify(productionHistory));
+    const state = {
+        clients,
+        suppliers,
+        inventory,
+        warehouses,
+        batches,
+        orders,
+        forecasts,
+        recipes,
+        tanks,
+        purchaseOrders,
+        productionHistory
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function showNotification(message, type = 'info') {
