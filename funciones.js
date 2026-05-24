@@ -1225,6 +1225,38 @@ function runProductionFlow() {
     // Parámetros del Sistema
     const LITROS_POR_LOTE = 120; // 1 tanque = 1 lote = 120L
     const MAX_TANQUES_SEMANA = 6;
+
+    const scheduledProduction = {};
+    const scheduleEntries = [];
+    const today = new Date();
+    const getWeekIndexFromDate = (dateStr) => {
+        const date = new Date(`${dateStr}T00:00:00`);
+        if (isNaN(date)) return -1;
+        const diffDays = Math.floor((date - today) / (1000 * 60 * 60 * 24));
+        return Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+    };
+
+    tanks.forEach(tank => {
+        (tank.schedule || []).forEach(schedule => {
+            const prod = inventory.find(p => p.id === schedule.productId);
+            if (!prod || prod.type === 'raw') return;
+            const weekIndex = getWeekIndexFromDate(schedule.start);
+            if (weekIndex < 0 || weekIndex > 3) return;
+            if (!scheduledProduction[schedule.productId]) {
+                scheduledProduction[schedule.productId] = [0, 0, 0, 0];
+            }
+            scheduledProduction[schedule.productId][weekIndex] += schedule.qty;
+            scheduleEntries.push({
+                tankName: tank.name,
+                productId: schedule.productId,
+                productName: prod.name,
+                weekIndex,
+                qty: schedule.qty,
+                start: schedule.start,
+                end: schedule.end
+            });
+        });
+    });
     
     // 1. Preparar Demanda por Semana (1 a 4)
     // Para simplificar la demo, agruparemos artificialmente pedidos al canal barril y botellas.
@@ -1241,20 +1273,11 @@ function runProductionFlow() {
     finalProducts.forEach(p => {
         demandBarril[p.id] = [0, 0, 0, 0];
         demandBotellas[p.id] = [0, 0, 0, 0];
-        
-        // Simular demanda base para que los cálculos no den 0 si el usuario no ingresó datos
-        demandBarril[p.id][0] = Math.floor(Math.random() * 50) + 50; // 50-100L Sem 1
-        demandBarril[p.id][1] = Math.floor(Math.random() * 50) + 50; // 50-100L Sem 2
-        demandBotellas[p.id][2] = Math.floor(Math.random() * 200) + 200; // 200-400 botellas Sem 3
-        demandBotellas[p.id][3] = Math.floor(Math.random() * 200) + 200; // 200-400 botellas Sem 4
-
-        weeklyBarrilDemand[0] += demandBarril[p.id][0];
-        weeklyBarrilDemand[1] += demandBarril[p.id][1];
     });
 
     // Agregar pedidos reales
     orders.forEach(o => {
-        const diffDays = Math.floor((new Date(o.dueDate) - new Date()) / (1000*60*60*24));
+        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBarril[o.productId]) {
             const volume = o.qty * (inventory.find(p=>p.id===o.productId)?.volumePerUnit || 1);
@@ -1264,7 +1287,7 @@ function runProductionFlow() {
     });
 
     forecasts.forEach(f => {
-        const diffDays = Math.floor((new Date(f.targetDate) - new Date()) / (1000*60*60*24));
+        const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBotellas[f.productId]) {
             demandBotellas[f.productId][w] += f.qty;
@@ -1307,44 +1330,46 @@ function runProductionFlow() {
             let detail = "";
             
             const unitVolume = p.volumePerUnit || 0.33;
+            const scheduledLiters = (scheduledProduction[p.id] || [0, 0, 0, 0])[w] || 0;
+            const scheduledBottles = Math.floor(scheduledLiters / unitVolume);
 
             if (w < 2) {
                 // Semanas 1 y 2: Canal Barril
                 const demandaL = demandBarril[p.id][w];
-                const demandaBotEquiv = Math.round(demandaL / unitVolume);
-                // Necesitamos cubrir demandaL. Si es > 0, lanzamos lotes
-                const lotesNecesarios = Math.ceil(demandaL / LITROS_POR_LOTE);
-                litrosProducir = lotesNecesarios * LITROS_POR_LOTE;
+                const producedBySchedule = scheduledLiters;
+                const falta = Math.max(0, demandaL - producedBySchedule);
+                const adicionales = Math.ceil(falta / LITROS_POR_LOTE) * LITROS_POR_LOTE;
+                litrosProducir = producedBySchedule + adicionales;
                 
-                // Lo que sobra de los barriles se envasa
                 const overflowLitros = Math.max(0, litrosProducir - demandaL);
                 overflowBotellas = Math.floor(overflowLitros / unitVolume);
                 currentBotellas += overflowBotellas;
-                
+
                 weeklyOverflowBottles[w] += overflowBotellas;
                 weeklyOverflowLiters[w] += overflowLitros;
                 weeklyProducedLiters[w] += litrosProducir;
 
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaL.toFixed(0)} L / ${demandaBotEquiv} bot<br>Overflow: +${overflowBotellas} bot / ${overflowLitros.toFixed(1)} L</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Plan real: ${formatDecimal(producedBySchedule)} L${adicionales ? ` + ${formatDecimal(adicionales)} L extra` : ''} / Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot / ${formatDecimal(overflowLitros)} L</span>`;
             } else {
                 // Semanas 3 y 4: Canal Botellas
+                currentBotellas += scheduledBottles;
                 const demandaB = demandBotellas[p.id][w];
-                const demandaLitros = demandaB * unitVolume;
-                currentBotellas -= demandaB; // Restamos demanda proyectada
-                
+                currentBotellas -= demandaB;
+
                 if (currentBotellas < 0) {
-                    // Necesitamos producir
                     const deficitBotellas = Math.abs(currentBotellas);
                     const deficitLitros = deficitBotellas * unitVolume;
                     const lotesNecesarios = Math.ceil(deficitLitros / LITROS_POR_LOTE);
-                    litrosProducir = lotesNecesarios * LITROS_POR_LOTE;
-                    
-                    const botellasNuevas = Math.floor(litrosProducir / unitVolume);
+                    const adicionales = lotesNecesarios * LITROS_POR_LOTE;
+                    litrosProducir = scheduledLiters + adicionales;
+                    const botellasNuevas = Math.floor(adicionales / unitVolume);
                     currentBotellas += botellasNuevas;
+                } else {
+                    litrosProducir = scheduledLiters;
                 }
                 
                 weeklyProducedLiters[w] += litrosProducir;
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${demandaB.toFixed(0)} bot / ${demandaLitros.toFixed(1)} L<br>Inv. Fin: ${currentBotellas} bot / ${(currentBotellas * unitVolume).toFixed(1)} L</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Plan real: ${formatDecimal(scheduledLiters)} L / Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot / ${formatDecimal(currentBotellas * unitVolume)} L</span>`;
             }
             
             mpsPlan[p.id][w] = litrosProducir;
@@ -2137,7 +2162,10 @@ function getWeekLabel(dateStr) {
 function renderWeeklyProductionTab() {
     const productionContainer = document.getElementById('weekly-production-table');
     const forecastContainer = document.getElementById('forecast-adjustment-table');
-    if (!productionContainer || !forecastContainer) return;
+    const historyEditor = document.getElementById('weekly-production-history-editor');
+    if (!productionContainer || !forecastContainer || !historyEditor) return;
+
+    updateWeeklyProductionProductSelect();
 
     const weeklyMap = {};
     productionHistory.forEach(hist => {
@@ -2163,6 +2191,7 @@ function renderWeeklyProductionTab() {
                     <th class="p-2 border">Producto</th>
                     <th class="p-2 border">Litros terminados</th>
                     <th class="p-2 border">Unidades terminadas</th>
+                    <th class="p-2 border">Acciones</th>
                 </tr>
             </thead>
             <tbody>`;
@@ -2172,10 +2201,56 @@ function renderWeeklyProductionTab() {
                 <td class="p-2 border">${row.productName}</td>
                 <td class="p-2 border">${formatDecimal(row.liters)}</td>
                 <td class="p-2 border">${formatDecimal(row.units)}</td>
+                <td class="p-2 border"><button type="button" onclick="openWeeklyProductionHistoryEditor('${row.week}', ${row.productId})" class="text-[#005B3A] font-semibold text-sm hover:underline">Ver / Ajustar</button></td>
             </tr>`;
         });
         html += '</tbody></table>';
         productionContainer.innerHTML = html;
+    }
+
+    const weeklyEntries = productionHistory.map(hist => {
+        const product = inventory.find(p => p.id === hist.productId);
+        return {
+            id: hist.id,
+            week: getWeekLabel(hist.endDate || hist.startDate),
+            productName: product ? product.name : 'Producto desconocido',
+            liters: hist.qtyLiters || 0,
+            units: hist.qtyUnits || 0,
+            endDate: hist.endDate || hist.startDate
+        };
+    });
+
+    if (weeklyEntries.length === 0) {
+        historyEditor.innerHTML = '<p class="text-gray-500 italic p-4">No hay registros de producción histórica para editar.</p>';
+    } else {
+        let html = `<div class="mb-4"><h3 class="text-lg font-bold text-gray-800">Registros de producción para ajustar</h3></div>
+            <table class="w-full text-left border-collapse border border-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="p-2 border">Semana</th>
+                        <th class="p-2 border">Producto</th>
+                        <th class="p-2 border">Litros</th>
+                        <th class="p-2 border">Unidades</th>
+                        <th class="p-2 border">Fecha fin</th>
+                        <th class="p-2 border">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+        weeklyEntries.forEach(entry => {
+            html += `<tr>
+                <td class="p-2 border">${entry.week}</td>
+                <td class="p-2 border">${entry.productName}</td>
+                <td class="p-2 border">${formatDecimal(entry.liters)}</td>
+                <td class="p-2 border">${formatDecimal(entry.units)}</td>
+                <td class="p-2 border">${entry.endDate}</td>
+                <td class="p-2 border space-x-2">
+                    <button type="button" onclick="editWeeklyProductionEntry(${entry.id})" class="text-blue-600 hover:text-blue-800 text-sm">Editar</button>
+                    <button type="button" onclick="deleteWeeklyProductionEntry(${entry.id})" class="text-red-600 hover:text-red-800 text-sm">Eliminar</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        historyEditor.innerHTML = html;
     }
 
     const forecastsByWeek = forecasts.map(f => {
@@ -2221,6 +2296,119 @@ function renderWeeklyProductionTab() {
         html += '</tbody></table>';
         forecastContainer.innerHTML = html;
     }
+}
+
+function updateWeeklyProductionProductSelect() {
+    const select = document.getElementById('weekly-edit-product');
+    if (!select) return;
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">-- Selecciona producto --</option>';
+    inventory.filter(p => p.type !== 'raw').forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = `${p.name} (${p.sku})`;
+        select.appendChild(opt);
+    });
+    if (currentValue) select.value = currentValue;
+}
+
+function resetWeeklyProductionForm() {
+    document.getElementById('weekly-edit-product').value = '';
+    document.getElementById('weekly-edit-week').value = '0';
+    document.getElementById('weekly-edit-liters').value = '';
+    document.getElementById('weekly-edit-units').value = '';
+    document.getElementById('weekly-edit-id')?.remove();
+}
+
+function getDateForWeekOffset(offset) {
+    const date = new Date();
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    date.setDate(diff + offset * 7 + 3);
+    return date.toISOString().slice(0, 10);
+}
+
+function openWeeklyProductionHistoryEditor(weekLabel, productId) {
+    const entries = productionHistory.filter(hist => getWeekLabel(hist.endDate || hist.startDate) === weekLabel && hist.productId === productId);
+    if (!entries.length) return;
+    const entry = entries[0];
+    editWeeklyProductionEntry(entry.id);
+}
+
+function saveWeeklyProductionEntry() {
+    const productId = parseInt(document.getElementById('weekly-edit-product').value);
+    const weekIndex = parseInt(document.getElementById('weekly-edit-week').value);
+    const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
+    const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
+    if (!productId || isNaN(weekIndex) || isNaN(liters) || liters <= 0) {
+        return showNotification('Selecciona producto, semana y cantidad válida.', 'error');
+    }
+    const product = inventory.find(p => p.id === productId);
+    const unitVolume = product?.volumePerUnit || 0.33;
+    const qtyUnits = !isNaN(unitsInput) && unitsInput > 0 ? unitsInput : Math.round(liters / unitVolume);
+    const endDate = getDateForWeekOffset(weekIndex);
+
+    const existingIdInput = document.getElementById('weekly-edit-id');
+    if (existingIdInput && existingIdInput.value) {
+        const entryId = parseInt(existingIdInput.value);
+        const entry = productionHistory.find(hist => hist.id === entryId);
+        if (entry) {
+            entry.productId = productId;
+            entry.qtyLiters = liters;
+            entry.qtyUnits = qtyUnits;
+            entry.startDate = endDate;
+            entry.endDate = endDate;
+            entry.tankName = entry.tankName || 'Manual';
+            saveData();
+            resetWeeklyProductionForm();
+            renderWeeklyProductionTab();
+            showNotification('Registro de producción actualizado.', 'success');
+            return;
+        }
+    }
+
+    productionHistory.unshift({
+        id: Date.now(),
+        productId,
+        qtyLiters: liters,
+        qtyUnits,
+        startDate: endDate,
+        endDate,
+        tankName: 'Manual'
+    });
+    saveData();
+    resetWeeklyProductionForm();
+    renderWeeklyProductionTab();
+    showNotification('Registro de producción semanal agregado.', 'success');
+}
+
+function editWeeklyProductionEntry(entryId) {
+    const entry = productionHistory.find(hist => hist.id === entryId);
+    if (!entry) return;
+    document.getElementById('weekly-edit-product').value = entry.productId;
+    const weekLabel = getWeekLabel(entry.endDate || entry.startDate);
+    const match = weekLabel.match(/S(\d+)/);
+    const weekIndex = match ? parseInt(match[1], 10) - 1 : 0;
+    document.getElementById('weekly-edit-week').value = !isNaN(weekIndex) && weekIndex >= 0 ? String(weekIndex) : '0';
+    document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
+    document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
+
+    let hidden = document.getElementById('weekly-edit-id');
+    if (!hidden) {
+        hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.id = 'weekly-edit-id';
+        document.body.appendChild(hidden);
+    }
+    hidden.value = entry.id;
+}
+
+function deleteWeeklyProductionEntry(entryId) {
+    if (!confirm('¿Eliminar este registro de producción? Esta acción no se puede deshacer.')) return;
+    productionHistory = productionHistory.filter(hist => hist.id !== entryId);
+    saveData();
+    renderWeeklyProductionTab();
+    showNotification('Registro de producción eliminado.', 'success');
 }
 
 function updateWizardTankSelect() {
