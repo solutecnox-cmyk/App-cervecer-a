@@ -405,11 +405,11 @@
                 </div>
                 <div class="mb-4">
                     <label class="block text-gray-700">Cantidad Inicial</label>
-                    <input type="number" id="product-quantity" required class="w-full p-2 border border-gray-300 rounded-md">
+                    <input type="number" id="product-quantity" step="0.00000001" required class="w-full p-2 border border-gray-300 rounded-md">
                 </div>
                 <div class="mb-4 hidden" id="product-safety-stock-div">
                     <label class="block text-gray-700">Cantidad mínima para alerta</label>
-                    <input type="number" id="product-safety-stock" step="0.01" value="0" class="w-full p-2 border border-gray-300 rounded-md">
+                    <input type="number" id="product-safety-stock" step="0.00000001" value="0" class="w-full p-2 border border-gray-300 rounded-md">
                 </div>
                 <div class="flex justify-end gap-2">
                     <button type="button" onclick="closeProductModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button>
@@ -470,7 +470,7 @@
                             </div>
                             <div>
                                 <label class="block text-gray-700">Cantidad inicial</label>
-                                <input type="number" id="product-created-quantity" class="w-full p-2 border border-gray-300 rounded-md">
+                                <input type="number" id="product-created-quantity" step="0.00000001" class="w-full p-2 border border-gray-300 rounded-md">
                             </div>
                             <div>
                                 <label class="block text-gray-700">Proveedor</label>
@@ -480,7 +480,7 @@
                             </div>
                             <div>
                                 <label class="block text-gray-700">Cantidad mínima (alerta)</label>
-                                <input type="number" id="product-created-safety" step="0.01" class="w-full p-2 border border-gray-300 rounded-md">
+                                <input type="number" id="product-created-safety" step="0.00000001" class="w-full p-2 border border-gray-300 rounded-md">
                             </div>
                         </div>
                         <div class="flex justify-end gap-2 mt-4">
