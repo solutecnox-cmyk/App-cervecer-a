@@ -283,8 +283,13 @@ function updateProductSupplierSelect() {
 }
 
 // --- Lógica de Inventario ---
-function openAddProductModal() {
+function openAddProductModal(type = 'final') {
     document.getElementById('product-form').reset();
+    document.getElementById('product-type').value = type;
+    document.getElementById('product-modal-title').textContent = type === 'raw' ? 'Añadir Materia Prima' : 'Añadir Producto Final';
+    document.getElementById('product-modal-subtitle').textContent = type === 'raw'
+        ? 'Registra materia prima: el precio de compra y el volumen por unidad no se mostrarán.'
+        : 'Registra producto final para ventas: completa precio y volumen para la planeación.';
     updateProductSupplierSelect();
     handleProductTypeChange();
     document.getElementById('product-modal').classList.remove('hidden');
@@ -295,36 +300,57 @@ function closeProductModal() {
 
 function handleProductTypeChange() {
     const type = document.getElementById('product-type').value;
-    const priceLabel = document.getElementById('product-price-label');
+    const priceDiv = document.getElementById('product-price-div');
+    const productVolumeDiv = document.getElementById('product-volume-div');
     const supplierDiv = document.getElementById('product-supplier-div');
     const safetyDiv = document.getElementById('product-safety-stock-div');
-    
+    const priceLabel = document.getElementById('product-price-label');
+
+    const priceInput = document.getElementById('product-price');
+    const volumeInput = document.getElementById('product-volume');
+    const safetyInput = document.getElementById('product-safety-stock');
+
     if (type === 'raw') {
-        priceLabel.textContent = 'Precio de Compra';
+        priceDiv.classList.add('hidden');
+        productVolumeDiv.classList.add('hidden');
         supplierDiv.classList.remove('hidden');
         safetyDiv.classList.remove('hidden');
+        priceInput.required = false;
+        priceInput.disabled = true;
+        volumeInput.required = false;
+        volumeInput.disabled = true;
+        safetyInput.disabled = false;
+        document.getElementById('product-supplier').value = '';
+        safetyInput.value = 0;
     } else {
-        priceLabel.textContent = 'Precio de Venta';
+        priceDiv.classList.remove('hidden');
+        productVolumeDiv.classList.remove('hidden');
         supplierDiv.classList.add('hidden');
         safetyDiv.classList.add('hidden');
+        priceInput.required = true;
+        priceInput.disabled = false;
+        volumeInput.required = true;
+        volumeInput.disabled = false;
+        safetyInput.disabled = true;
         document.getElementById('product-supplier').value = '';
-        document.getElementById('product-safety-stock').value = 0;
+        safetyInput.value = 0;
     }
 }
 
 function saveProduct(event) {
     event.preventDefault();
+    const type = document.getElementById('product-type').value || 'final';
     const newProduct = {
         id: Date.now(),
-        type: document.getElementById('product-type').value || 'final',
+        type,
         sku: document.getElementById('product-sku').value,
         name: document.getElementById('product-name').value,
-        price: parseFloat(document.getElementById('product-price').value),
+        price: type === 'raw' ? 0 : parseFloat(document.getElementById('product-price').value),
         supplierId: document.getElementById('product-supplier').value || null,
         quantity: parseFloat(document.getElementById('product-quantity').value),
-        volumePerUnit: parseFloat(document.getElementById('product-volume').value) || 1,
+        volumePerUnit: type === 'raw' ? 0 : parseFloat(document.getElementById('product-volume').value) || 1,
         unitType: document.getElementById('product-unit-type').value || 'und',
-        safetyStock: parseFloat(document.getElementById('product-safety-stock').value) || 0,
+        safetyStock: type === 'raw' ? parseFloat(document.getElementById('product-safety-stock').value) || 0 : 0,
     };
     inventory.push(newProduct);
     saveData();
