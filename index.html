@@ -378,6 +378,7 @@
                 <div class="mb-4">
                     <label class="block text-gray-700">Volumen por unidad (L)</label>
                     <input type="number" id="product-volume" step="0.01" value="1" required class="w-full p-2 border border-gray-300 rounded-md">
+                    <p class="text-xs text-gray-500 italic mt-1">Ej: 0.33 para botella 330 mL — se usa en cálculos de planeación (MPS/MRP).</p>
                 </div>
                 <div class="mb-4">
                     <label class="block text-gray-700">Unidad</label>
@@ -528,9 +529,11 @@
             <form id="recipe-form" onsubmit="saveRecipe(event)">
                 <div class="mb-4">
                     <label class="block text-gray-700">Producto Final</label>
-                    <select id="recipe-product-select" required class="w-full p-2 border border-gray-300 rounded-md">
-                        <option value="">-- Selecciona producto final --</option>
-                    </select>
+                    <input list="recipe-product-list" id="recipe-product-input" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Escribe o selecciona un producto (puedes crear uno nuevo)">
+                    <datalist id="recipe-product-list">
+                        <!-- Opciones generadas por JS: nombre de producto -->
+                    </datalist>
+                    <p class="text-xs text-gray-500 italic mt-1">Puedes escribir un nombre nuevo o elegir uno existente de la lista.</p>
                 </div>
                 <div class="mb-4">
                     <div class="flex justify-between items-center mb-2">
