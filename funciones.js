@@ -16,6 +16,7 @@ let forecasts = savedState.forecasts || JSON.parse(localStorage.getItem('forecas
 let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || []; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
 let editingRecipeProductId = null;
 let editingTankId = null;
+let editingNewProductId = null; // para modal emergente cuando se crea producto desde receta
 let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
 let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
 let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
@@ -330,6 +331,62 @@ function saveProduct(event) {
     loadInventory();
     closeProductModal();
     showNotification('Producto añadido al inventario.');
+}
+
+// --- Modal para producto creado automáticamente desde Receta ---
+function openProductCreatedModal(id) {
+    const prod = inventory.find(p => p.id === id);
+    if (!prod) return;
+    document.getElementById('product-created-sku').value = prod.sku || '';
+    document.getElementById('product-created-name').value = prod.name || '';
+    document.getElementById('product-created-price').value = prod.price || 0;
+    document.getElementById('product-created-volume').value = prod.volumePerUnit || 0.33;
+    document.getElementById('product-created-unit').value = prod.unitType || 'und';
+    document.getElementById('product-created-quantity').value = prod.quantity || 0;
+    document.getElementById('product-created-safety').value = prod.safetyStock || 0;
+    updateProductSupplierSelectForModal();
+    document.getElementById('product-created-supplier').value = prod.supplierId || '';
+    document.getElementById('product-created-modal').classList.remove('hidden');
+}
+
+function closeProductCreatedModal() {
+    document.getElementById('product-created-modal').classList.add('hidden');
+    editingNewProductId = null;
+}
+
+function updateProductSupplierSelectForModal() {
+    const sel = document.getElementById('product-created-supplier');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- Selecciona proveedor --</option>';
+    suppliers.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.name} (${s.nit})`;
+        sel.appendChild(opt);
+    });
+}
+
+function saveCreatedProductFromModal(event) {
+    event.preventDefault();
+    if (!editingNewProductId) return;
+    const prod = inventory.find(p => p.id === editingNewProductId);
+    if (!prod) return;
+    prod.sku = document.getElementById('product-created-sku').value || prod.sku;
+    // name no editable en modal (se asume viene de la receta)
+    prod.price = parseFloat(document.getElementById('product-created-price').value) || 0;
+    prod.volumePerUnit = parseFloat(document.getElementById('product-created-volume').value) || prod.volumePerUnit || 0.33;
+    prod.unitType = document.getElementById('product-created-unit').value || prod.unitType;
+    prod.quantity = parseFloat(document.getElementById('product-created-quantity').value) || prod.quantity || 0;
+    prod.safetyStock = parseFloat(document.getElementById('product-created-safety').value) || prod.safetyStock || 0;
+    const supp = document.getElementById('product-created-supplier').value;
+    prod.supplierId = supp ? (isNaN(parseInt(supp)) ? null : parseInt(supp)) : null;
+    saveData();
+    loadInventory();
+    updateBatchProductSelect();
+    updateOrderProductSelect();
+    updateForecastProductSelect();
+    closeProductCreatedModal();
+    showNotification('Producto actualizado correctamente.', 'success');
 }
 
 function loadInventory() {
@@ -903,7 +960,9 @@ function saveRecipe(event) {
         updateForecastProductSelect();
         prod = newProd;
         productId = newProd.id;
-        showNotification('Producto final creado automáticamente: ' + newProd.name, 'success');
+        // Abrir modal emergente para revisar/editar el producto recién creado
+        editingNewProductId = newProd.id;
+        setTimeout(() => openProductCreatedModal(newProd.id), 120);
     }
 
     const ingredientRows = document.querySelectorAll('.ingredient-row');
