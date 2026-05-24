@@ -23,6 +23,7 @@ let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) 
 let editingRecipeProductId = null;
 let editingTankId = null;
 let editingNewProductId = null; // para modal emergente cuando se crea producto desde receta
+let editingProductId = null; // para editar productos existentes desde modales
 let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
 let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
 let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
@@ -289,19 +290,42 @@ function updateProductSupplierSelect() {
 }
 
 // --- Lógica de Inventario ---
-function openAddProductModal(type = 'final') {
+function openAddProductModal(type = 'final', productId = null) {
+    editingProductId = null;
     document.getElementById('product-form').reset();
-    document.getElementById('product-type').value = type;
-    document.getElementById('product-modal-title').textContent = type === 'raw' ? 'Añadir Materia Prima' : 'Añadir Producto Final';
-    document.getElementById('product-modal-subtitle').textContent = type === 'raw'
-        ? 'Registra materia prima: el precio de compra y el volumen por unidad no se mostrarán.'
-        : 'Registra producto final para ventas: completa precio y volumen para la planeación.';
+    document.getElementById('product-id').value = '';
+    if (productId) {
+        const product = inventory.find(p => p.id === productId);
+        if (product) {
+            editingProductId = productId;
+            document.getElementById('product-type').value = product.type;
+            document.getElementById('product-sku').value = product.sku || '';
+            document.getElementById('product-name').value = product.name || '';
+            document.getElementById('product-price').value = product.price != null ? product.price : 0;
+            document.getElementById('product-volume').value = product.type === 'raw' ? (product.purchaseUnit || 1) : (product.volumePerUnit || 1);
+            document.getElementById('product-unit-type').value = product.unitType || 'und';
+            document.getElementById('product-quantity').value = product.quantity != null ? product.quantity : 0;
+            document.getElementById('product-safety-stock').value = product.safetyStock != null ? product.safetyStock : 0;
+            document.getElementById('product-supplier').value = product.supplierId || '';
+            document.getElementById('product-modal-title').textContent = product.type === 'raw' ? 'Editar Materia Prima' : 'Editar Producto Final';
+            document.getElementById('product-modal-subtitle').textContent = product.type === 'raw'
+                ? 'Edita las propiedades de la materia prima. También puedes ajustar el stock mínimo de seguridad.'
+                : 'Edita los datos del producto final para ventas y planeación.';
+        }
+    } else {
+        document.getElementById('product-type').value = type;
+        document.getElementById('product-modal-title').textContent = type === 'raw' ? 'Añadir Materia Prima' : 'Añadir Producto Final';
+        document.getElementById('product-modal-subtitle').textContent = type === 'raw'
+            ? 'Registra materia prima: el precio de compra y el volumen por unidad no se mostrarán.'
+            : 'Registra producto final para ventas: completa precio y volumen para la planeación.';
+    }
     updateProductSupplierSelect();
     handleProductTypeChange();
     document.getElementById('product-modal').classList.remove('hidden');
 }
 function closeProductModal() {
     document.getElementById('product-modal').classList.add('hidden');
+    editingProductId = null;
 }
 
 function handleProductTypeChange() {
@@ -329,8 +353,6 @@ function handleProductTypeChange() {
         volumeInput.required = true;
         volumeInput.disabled = false;
         safetyInput.disabled = false;
-        document.getElementById('product-supplier').value = '';
-        safetyInput.value = 0;
         volumeLabel.textContent = 'Tamaño de unidad de compra';
         volumeHelp.textContent = 'Ej: 25 para sack, caja o lote de compra. Se usa para cálculos de reorden y compras.';
     } else {
@@ -343,8 +365,6 @@ function handleProductTypeChange() {
         volumeInput.required = true;
         volumeInput.disabled = false;
         safetyInput.disabled = true;
-        document.getElementById('product-supplier').value = '';
-        safetyInput.value = 0;
         volumeLabel.textContent = 'Volumen por unidad (L)';
         volumeHelp.textContent = 'Ej: 0.33 para botella 330 mL — se usa en cálculos de planeación (MPS/MRP).';
     }
@@ -353,8 +373,7 @@ function handleProductTypeChange() {
 function saveProduct(event) {
     event.preventDefault();
     const type = document.getElementById('product-type').value || 'final';
-    const newProduct = {
-        id: Date.now(),
+    const data = {
         type,
         sku: document.getElementById('product-sku').value,
         name: document.getElementById('product-name').value,
@@ -362,14 +381,25 @@ function saveProduct(event) {
         supplierId: document.getElementById('product-supplier').value || null,
         quantity: parseFloat(document.getElementById('product-quantity').value),
         volumePerUnit: type === 'raw' ? 0 : parseFloat(document.getElementById('product-volume').value) || 1,
+        purchaseUnit: type === 'raw' ? parseFloat(document.getElementById('product-volume').value) || 1 : undefined,
         unitType: document.getElementById('product-unit-type').value || 'und',
         safetyStock: type === 'raw' ? parseFloat(document.getElementById('product-safety-stock').value) || 0 : 0,
     };
-    inventory.push(newProduct);
+    if (editingProductId) {
+        const existing = inventory.find(p => p.id === editingProductId);
+        if (existing) {
+            Object.assign(existing, data);
+            if (type === 'raw') existing.volumePerUnit = 0;
+        }
+        showNotification('Producto actualizado en el inventario.', 'success');
+    } else {
+        const newProduct = { id: Date.now(), ...data };
+        inventory.push(newProduct);
+        showNotification('Producto añadido al inventario.', 'success');
+    }
     saveData();
     loadInventory();
     closeProductModal();
-    showNotification('Producto añadido al inventario.');
 }
 
 // --- Modal para producto creado automáticamente desde Receta ---
@@ -2227,6 +2257,7 @@ function wizardCheckIngredients() {
     }
 
     let allAvailable = true;
+    let missingItems = [];
     let html = '<ul class="space-y-1 text-sm">';
     const product = inventory.find(p => p.id === prodId);
     const totalVolume = qty; // La receta se define por unidad de volumen (L)
@@ -2237,15 +2268,31 @@ function wizardCheckIngredients() {
         if (raw) {
             const reqQty = ing.qtyPerUnit * totalVolume;
             const hasEnough = raw.quantity >= reqQty;
-            if (!hasEnough) allAvailable = false;
+            if (!hasEnough) {
+                allAvailable = false;
+                missingItems.push({ raw, reqQty });
+            }
             
-            const extraInfo = totalUnits !== null && raw.type !== 'raw' ? ` (${formatDecimal(totalUnits)} unidades)` : '';
-            html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'}">
-                <i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
-                ${raw.name}: Req. ${formatDecimal(reqQty)}${extraInfo} (Stock: ${formatDecimal(raw.quantity)})
+            html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'} flex items-start justify-between gap-2">
+                <span><i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
+                ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})</span>
+                <button type="button" onclick="openEditProductModal(${raw.id}, ${reqQty})" class="text-blue-600 hover:text-blue-800 text-xs font-semibold rounded px-2 py-1 border border-blue-200 bg-blue-50">Editar</button>
             </li>`;
         }
     });
+    if (missingItems.length > 0) {
+        html = `
+            <div class="mb-3">
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Selecciona el ingrediente faltante para revisar o ajustar</label>
+                <div class="flex gap-2 mb-3 flex-wrap">
+                    <select id="wizard-missing-item-select" class="p-2 border border-gray-300 rounded-md flex-1 text-sm">
+                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
+                    </select>
+                    <button type="button" onclick="openSelectedWizardRawItem()" class="px-3 py-2 bg-[#005B3A] text-white rounded-md text-sm hover:bg-[#00422a]">Editar seleccionado</button>
+                </div>
+            </div>
+        ` + html;
+    }
     html += '</ul>';
     
     if (allAvailable) {
@@ -2256,6 +2303,32 @@ function wizardCheckIngredients() {
     
     statusDiv.innerHTML = html;
     return allAvailable;
+}
+
+function openEditProductModal(productId, reqQty = null) {
+    const product = inventory.find(p => p.id === productId);
+    if (!product) return;
+    openAddProductModal(product.type, productId);
+    const note = document.getElementById('product-demand-note');
+    if (note) {
+        if (reqQty != null) {
+            note.classList.remove('hidden');
+            note.textContent = `Cantidad requerida para esta producción: ${formatDecimal(reqQty)}`;
+        } else {
+            note.classList.add('hidden');
+            note.textContent = '';
+        }
+    }
+}
+
+function openSelectedWizardRawItem() {
+    const select = document.getElementById('wizard-missing-item-select');
+    if (!select) return;
+    const [idValue, qtyValue] = select.value.split('|');
+    const rawId = parseInt(idValue);
+    const reqQty = qtyValue ? parseFloat(qtyValue) : null;
+    if (!rawId) return;
+    openEditProductModal(rawId, reqQty);
 }
 
 function wizardStartProduction() {
