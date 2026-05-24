@@ -310,18 +310,23 @@ function handleProductTypeChange() {
     const volumeInput = document.getElementById('product-volume');
     const safetyInput = document.getElementById('product-safety-stock');
 
+    const volumeLabel = document.getElementById('product-volume-label');
+    const volumeHelp = document.getElementById('product-volume-help');
+
     if (type === 'raw') {
         priceDiv.classList.add('hidden');
-        productVolumeDiv.classList.add('hidden');
+        productVolumeDiv.classList.remove('hidden');
         supplierDiv.classList.remove('hidden');
         safetyDiv.classList.remove('hidden');
         priceInput.required = false;
         priceInput.disabled = true;
-        volumeInput.required = false;
-        volumeInput.disabled = true;
+        volumeInput.required = true;
+        volumeInput.disabled = false;
         safetyInput.disabled = false;
         document.getElementById('product-supplier').value = '';
         safetyInput.value = 0;
+        volumeLabel.textContent = 'Tamaño de unidad de compra';
+        volumeHelp.textContent = 'Ej: 25 para sack, caja o lote de compra. Se usa para cálculos de reorden y compras.';
     } else {
         priceDiv.classList.remove('hidden');
         productVolumeDiv.classList.remove('hidden');
@@ -334,6 +339,8 @@ function handleProductTypeChange() {
         safetyInput.disabled = true;
         document.getElementById('product-supplier').value = '';
         safetyInput.value = 0;
+        volumeLabel.textContent = 'Volumen por unidad (L)';
+        volumeHelp.textContent = 'Ej: 0.33 para botella 330 mL — se usa en cálculos de planeación (MPS/MRP).';
     }
 }
 
