@@ -27,6 +27,7 @@ let editingProductId = null; // para editar productos existentes desde modales
 let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
 let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
 let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
+let weekCalculationMode = savedState.weekCalculationMode || 'month';
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -1744,7 +1745,8 @@ function saveData() {
         recipes,
         tanks,
         purchaseOrders,
-        productionHistory
+        productionHistory,
+        weekCalculationMode
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -2168,15 +2170,57 @@ function updateWizardProductSelect() {
     if (currentVal) select.value = currentVal;
 }
 
-function getWeekLabel(dateStr) {
-    const d = new Date(dateStr);
+function changeWeekMode(mode) {
+    weekCalculationMode = mode;
+    saveData();
+    refreshAppUI();
+}
+
+function getWeekOfMonthLabel(dateStr) {
+    const d = new Date(`${dateStr}T00:00:00`);
     if (isNaN(d)) return 'Sin semana';
-    const target = new Date(d.valueOf());
-    const dayNr = (target.getDay() + 6) % 7; // Monday as first day
-    target.setDate(target.getDate() - dayNr + 3);
-    const firstThursday = new Date(target.getFullYear(), 0, 4);
-    const weekNumber = 1 + Math.round(((target - firstThursday) / 86400000 - 3 + ((firstThursday.getDay() + 6) % 7)) / 7);
-    return `${target.getFullYear()}-S${String(weekNumber).padStart(2, '0')}`;
+    const dayOfMonth = d.getDate();
+    const firstDayOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    const firstDayOfWeek = firstDayOfMonth.getDay(); // 0 es Domingo, 1 es Lunes...
+    const startOffset = (firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1);
+    const weekOfMonth = Math.ceil((dayOfMonth + startOffset) / 7);
+    
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const monthName = monthNames[d.getMonth()];
+    return `${monthName} - Semana ${weekOfMonth}`;
+}
+
+function getRelativeWeekLabel(dateStr) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(d)) return 'Sin semana';
+    
+    // Buscar la fecha de producción más antigua
+    let minDate = d;
+    productionHistory.forEach(hist => {
+        const histDate = new Date(`${hist.startDate || hist.endDate}T00:00:00`);
+        if (!isNaN(histDate) && histDate < minDate) {
+            minDate = histDate;
+        }
+    });
+    
+    // Alinear la fecha mínima al lunes de esa semana
+    const minDateAligned = new Date(minDate);
+    const day = minDateAligned.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    minDateAligned.setDate(minDateAligned.getDate() + diffToMonday);
+    
+    const diffTime = d - minDateAligned;
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const weekNumber = Math.floor(diffDays / 7) + 1;
+    return `Semana ${weekNumber}`;
+}
+
+function getWeekLabel(dateStr) {
+    if (weekCalculationMode === 'relative') {
+        return getRelativeWeekLabel(dateStr);
+    } else {
+        return getWeekOfMonthLabel(dateStr);
+    }
 }
 
 function renderWeeklyProductionTab() {
@@ -2184,6 +2228,11 @@ function renderWeeklyProductionTab() {
     const forecastContainer = document.getElementById('forecast-adjustment-table');
     const historyEditor = document.getElementById('weekly-production-history-editor');
     if (!productionContainer || !forecastContainer || !historyEditor) return;
+
+    const modeSelect = document.getElementById('week-mode-select');
+    if (modeSelect) {
+        modeSelect.value = weekCalculationMode;
+    }
 
     updateWeeklyProductionProductSelect();
 
@@ -2409,10 +2458,7 @@ function editWeeklyProductionEntry(entryId) {
     const entry = productionHistory.find(hist => hist.id === entryId);
     if (!entry) return;
     document.getElementById('weekly-edit-product').value = entry.productId;
-    const weekLabel = getWeekLabel(entry.endDate || entry.startDate);
-    const match = weekLabel.match(/S(\d+)/);
-    const weekIndex = match ? parseInt(match[1], 10) - 1 : 0;
-    document.getElementById('weekly-edit-week').value = !isNaN(weekIndex) && weekIndex >= 0 ? String(weekIndex) : '0';
+    document.getElementById('weekly-edit-date').value = entry.endDate || entry.startDate || '';
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
 
