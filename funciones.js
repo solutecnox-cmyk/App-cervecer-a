@@ -2334,7 +2334,7 @@ function updateWeeklyProductionProductSelect() {
 
 function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-product').value = '';
-    document.getElementById('weekly-edit-week').value = '0';
+    document.getElementById('weekly-edit-date').value = '';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
     document.getElementById('weekly-edit-id')?.remove();
@@ -2357,16 +2357,17 @@ function openWeeklyProductionHistoryEditor(weekLabel, productId) {
 
 function saveWeeklyProductionEntry() {
     const productId = parseInt(document.getElementById('weekly-edit-product').value);
-    const weekIndex = parseInt(document.getElementById('weekly-edit-week').value);
+    const dateInput = document.getElementById('weekly-edit-date').value;
     const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
     const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
-    if (!productId || isNaN(weekIndex) || isNaN(liters) || liters <= 0) {
-        return showNotification('Selecciona producto, semana y cantidad válida.', 'error');
+    
+    if (!productId || !dateInput || isNaN(liters) || liters <= 0) {
+        return showNotification('Selecciona producto, fecha y cantidad válida (Litros).', 'error');
     }
+    
     const product = inventory.find(p => p.id === productId);
     const unitVolume = product?.volumePerUnit || 0.33;
     const qtyUnits = !isNaN(unitsInput) && unitsInput > 0 ? unitsInput : Math.round(liters / unitVolume);
-    const endDate = getDateForWeekOffset(weekIndex);
 
     const existingIdInput = document.getElementById('weekly-edit-id');
     if (existingIdInput && existingIdInput.value) {
@@ -2376,10 +2377,11 @@ function saveWeeklyProductionEntry() {
             entry.productId = productId;
             entry.qtyLiters = liters;
             entry.qtyUnits = qtyUnits;
-            entry.startDate = endDate;
-            entry.endDate = endDate;
+            entry.startDate = dateInput;
+            entry.endDate = dateInput;
             entry.tankName = entry.tankName || 'Manual';
             saveData();
+            refreshAppUI();
             resetWeeklyProductionForm();
             renderWeeklyProductionTab();
             showNotification('Registro de producción actualizado.', 'success');
@@ -2392,11 +2394,12 @@ function saveWeeklyProductionEntry() {
         productId,
         qtyLiters: liters,
         qtyUnits,
-        startDate: endDate,
-        endDate,
+        startDate: dateInput,
+        endDate: dateInput,
         tankName: 'Manual'
     });
     saveData();
+    refreshAppUI();
     resetWeeklyProductionForm();
     renderWeeklyProductionTab();
     showNotification('Registro de producción semanal agregado.', 'success');
