@@ -211,6 +211,7 @@
                 <div class="flex border-b border-gray-200 mb-6">
                     <button onclick="switchProductionTab('nueva')" id="tab-btn-nueva" class="py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]">Nueva Producción</button>
                     <button onclick="switchProductionTab('seguimiento')" id="tab-btn-seguimiento" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Seguimiento de Lotes</button>
+                    <button onclick="switchProductionTab('semanal')" id="tab-btn-semanal" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Producción Semanal</button>
                     <button onclick="switchProductionTab('planeacion')" id="tab-btn-planeacion" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Planeación (MPS/MRP)</button>
                 </div>
 
@@ -294,6 +295,20 @@
                         <h2 class="text-lg font-bold mb-4 text-gray-600"><i class="fas fa-eye"></i> Vista Gráfica de Tanques</h2>
                         <div id="tanks-visual-container" class="flex flex-wrap gap-6 justify-center">
                             <!-- Tanques SVG renderizados via JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: Producción Semanal -->
+                <div id="tab-semanal" class="hidden fade-in">
+                    <div class="grid grid-cols-1 gap-6 mb-6">
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                            <h2 class="text-xl font-bold mb-4 text-[#005B3A]"><i class="fas fa-calendar-week"></i> Cuadro de Producción por Semana</h2>
+                            <div id="weekly-production-table"></div>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                            <h2 class="text-xl font-bold mb-4 text-gray-700"><i class="fas fa-balance-scale-left"></i> Ajuste de Pronóstico con Producto Terminado</h2>
+                            <div id="forecast-adjustment-table"></div>
                         </div>
                     </div>
                 </div>
