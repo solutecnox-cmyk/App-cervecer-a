@@ -29,6 +29,11 @@ let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getIte
 let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
 let weekCalculationMode = savedState.weekCalculationMode || 'month';
 let customWeeklyCapacities = savedState.customWeeklyCapacities || [720, 720, 720, 720];
+let customWeeklyBarrilDemand = savedState.customWeeklyBarrilDemand || [0, 0, 0, 0];
+let customWeeklyForecastLiters = savedState.customWeeklyForecastLiters || [0, 0, 0, 0];
+let customWeeklyOverflowBottles = savedState.customWeeklyOverflowBottles || [0, 0, 0, 0];
+let customWeeklyOverflowLiters = savedState.customWeeklyOverflowLiters || [0, 0, 0, 0];
+
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -51,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTrackingActive();
     renderTrackingHistory();
     showSection('produccion');
-    switchProductionTab('nueva');
+    switchProductionTab('semanal');
 });
 
 // --- Semilla de Datos de Ejemplo (Cervecería B&E) ---
@@ -1259,30 +1264,27 @@ function runProductionFlow() {
     });
     
     // 1. Preparar Demanda por Semana (1 a 4)
-    // Para simplificar la demo, agruparemos artificialmente pedidos al canal barril y botellas.
-    // Si no hay suficientes datos, generaremos demanda base.
     const demandBarril = {}; // Litros por semana
     const demandBotellas = {}; // Unidades por semana
-    let weeklyBarrilDemand = [0, 0, 0, 0];
+    let weeklyBarrilDemand = [...customWeeklyBarrilDemand];
     let weeklyForecastBottles = [0, 0, 0, 0];
-    let weeklyForecastLiters = [0, 0, 0, 0];
+    let weeklyForecastLiters = [...customWeeklyForecastLiters];
     let weeklyProducedLiters = [0, 0, 0, 0];
-    let weeklyOverflowBottles = [0, 0, 0, 0];
-    let weeklyOverflowLiters = [0, 0, 0, 0];
+    let weeklyOverflowBottles = [...customWeeklyOverflowBottles];
+    let weeklyOverflowLiters = [...customWeeklyOverflowLiters];
 
     finalProducts.forEach(p => {
         demandBarril[p.id] = [0, 0, 0, 0];
         demandBotellas[p.id] = [0, 0, 0, 0];
     });
 
-    // Agregar pedidos reales
+    // Agregar pedidos reales por producto (se usan en detalles del MPS de cada sabor)
     orders.forEach(o => {
         const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBarril[o.productId]) {
             const volume = o.qty * (inventory.find(p=>p.id===o.productId)?.volumePerUnit || 1);
             demandBarril[o.productId][w] += volume;
-            weeklyBarrilDemand[w] += volume;
         }
     });
 
@@ -1292,10 +1294,16 @@ function runProductionFlow() {
         if (demandBotellas[f.productId]) {
             demandBotellas[f.productId][w] += f.qty;
             weeklyForecastBottles[w] += f.qty;
-            const volume = f.qty * (inventory.find(p=>p.id===f.productId)?.volumePerUnit || 0.33);
-            weeklyForecastLiters[w] += volume;
         }
     });
+
+    // Helper para determinar la semana del registro histórico
+    const getWeekIndexForHistoryEntry = (hist) => {
+        if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
+            return hist.week - 1;
+        }
+        return getWeekIndexFromDate(hist.startDate || hist.endDate);
+    };
 
     // 2. Calcular MPS (Plan Maestro de Producción)
     let totalLiters = 0;
@@ -1320,59 +1328,44 @@ function runProductionFlow() {
     finalProducts.forEach(p => {
         mpsPlan[p.id] = [0, 0, 0, 0];
         invProjectedPT[p.id] = [0, 0, 0, 0];
-        
+    });
+
+    // Rellenar producción real desde historial de producción semanal
+    productionHistory.forEach(hist => {
+        const wIdx = getWeekIndexForHistoryEntry(hist);
+        if (wIdx >= 0 && wIdx <= 3 && mpsPlan[hist.productId]) {
+            mpsPlan[hist.productId][wIdx] += hist.qtyLiters || 0;
+            weeklyProducedLiters[wIdx] += hist.qtyLiters || 0;
+        }
+    });
+
+    finalProducts.forEach(p => {
         let currentBotellas = p.quantity; // Inventario inicial PT
         let pmpDetails = []; // Textos descriptivos para UI
         
         for (let w = 0; w < 4; w++) {
-            let litrosProducir = 0;
-            let overflowBotellas = 0;
-            let detail = "";
-            
             const unitVolume = p.volumePerUnit || 0.33;
-            const scheduledLiters = (scheduledProduction[p.id] || [0, 0, 0, 0])[w] || 0;
-            const scheduledBottles = Math.floor(scheduledLiters / unitVolume);
-
+            const litrosProducir = mpsPlan[p.id][w];
+            const producedUnits = Math.round(litrosProducir / unitVolume);
+            
+            let detail = "";
             if (w < 2) {
                 // Semanas 1 y 2: Canal Barril
                 const demandaL = demandBarril[p.id][w];
-                const producedBySchedule = scheduledLiters;
-                const falta = Math.max(0, demandaL - producedBySchedule);
-                const adicionales = Math.ceil(falta / LITROS_POR_LOTE) * LITROS_POR_LOTE;
-                litrosProducir = producedBySchedule + adicionales;
-                
                 const overflowLitros = Math.max(0, litrosProducir - demandaL);
-                overflowBotellas = Math.floor(overflowLitros / unitVolume);
+                const overflowBotellas = Math.floor(overflowLitros / unitVolume);
                 currentBotellas += overflowBotellas;
-
-                weeklyOverflowBottles[w] += overflowBotellas;
-                weeklyOverflowLiters[w] += overflowLitros;
-                weeklyProducedLiters[w] += litrosProducir;
-
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Plan real: ${formatDecimal(producedBySchedule)} L${adicionales ? ` + ${formatDecimal(adicionales)} L extra` : ''} / Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot / ${formatDecimal(overflowLitros)} L</span>`;
+                
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Prod. Semanal / Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot</span>`;
             } else {
                 // Semanas 3 y 4: Canal Botellas
-                currentBotellas += scheduledBottles;
+                currentBotellas += producedUnits;
                 const demandaB = demandBotellas[p.id][w];
                 currentBotellas -= demandaB;
-
-                if (currentBotellas < 0) {
-                    const deficitBotellas = Math.abs(currentBotellas);
-                    const deficitLitros = deficitBotellas * unitVolume;
-                    const lotesNecesarios = Math.ceil(deficitLitros / LITROS_POR_LOTE);
-                    const adicionales = lotesNecesarios * LITROS_POR_LOTE;
-                    litrosProducir = scheduledLiters + adicionales;
-                    const botellasNuevas = Math.floor(adicionales / unitVolume);
-                    currentBotellas += botellasNuevas;
-                } else {
-                    litrosProducir = scheduledLiters;
-                }
                 
-                weeklyProducedLiters[w] += litrosProducir;
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Plan real: ${formatDecimal(scheduledLiters)} L / Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot / ${formatDecimal(currentBotellas * unitVolume)} L</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Prod. Semanal / Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot</span>`;
             }
             
-            mpsPlan[p.id][w] = litrosProducir;
             invProjectedPT[p.id][w] = currentBotellas;
             lotesPorSemana[w] += Math.ceil(litrosProducir / LITROS_POR_LOTE);
             totalLiters += litrosProducir;
@@ -1557,26 +1550,41 @@ function runProductionFlow() {
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
-                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
+                        ${[0, 1, 2, 3].map(w => `
+                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('barril', ${w})">
+                                <span class="font-semibold text-gray-800">${weeklyBarrilDemand[w]} L</span>
+                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            </td>
+                        `).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold">Overflow embotellado barril (bot)</td>
-                        ${weeklyOverflowBottles.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)}</td>
+                        ${[0, 1, 2, 3].map(w => `
+                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('overflow_bottles', ${w})">
+                                <span class="font-semibold text-gray-800">${weeklyOverflowBottles[w]} Bot</span>
+                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            </td>
+                        `).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)} Bot</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Producción según pronósticos (L)</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
+                        ${[0, 1, 2, 3].map(w => `
+                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('forecast', ${w})">
+                                <span class="font-semibold text-gray-800">${weeklyForecastLiters[w]} L</span>
+                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            </td>
+                        `).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">PRODUCCIÓN TOTAL (L)</td>
-                        ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(producedTotal)}</td>
+                        ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center font-semibold text-gray-800">${formatDecimal(v)} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(producedTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
@@ -1822,6 +1830,43 @@ function editWeeklyCapacity(weekIndex) {
     showNotification(`Capacidad de la Semana ${weekIndex + 1} actualizada a ${newVal} L`, 'success');
 }
 
+function editWeeklyVolumeTableValue(type, weekIndex) {
+    let currentVal = 0;
+    let label = "";
+    if (type === 'barril') {
+        currentVal = customWeeklyBarrilDemand[weekIndex];
+        label = "Pedidos fijos — Barril (L)";
+    } else if (type === 'overflow_bottles') {
+        currentVal = customWeeklyOverflowBottles[weekIndex];
+        label = "Overflow embotellado barril (bot)";
+    } else if (type === 'forecast') {
+        currentVal = customWeeklyForecastLiters[weekIndex];
+        label = "Producción según pronósticos (L)";
+    }
+    
+    const valInput = prompt(`Ingrese el valor para ${label} en la Semana ${weekIndex + 1}:`, currentVal);
+    if (valInput === null || valInput.trim() === "") return;
+    
+    const newVal = parseFloat(valInput);
+    if (isNaN(newVal) || newVal < 0) {
+        return showNotification('Por favor ingrese un valor numérico válido mayor o igual a 0.', 'error');
+    }
+    
+    if (type === 'barril') {
+        customWeeklyBarrilDemand[weekIndex] = newVal;
+    } else if (type === 'overflow_bottles') {
+        customWeeklyOverflowBottles[weekIndex] = newVal;
+        customWeeklyOverflowLiters[weekIndex] = newVal * 0.33; // Convert bottles to liters assuming 0.33L per bottle
+    } else if (type === 'forecast') {
+        customWeeklyForecastLiters[weekIndex] = newVal;
+    }
+    
+    saveData();
+    refreshAppUI();
+    runProductionFlow();
+    showNotification(`Valor de ${label} para la Semana ${weekIndex + 1} actualizado a ${newVal}`, 'success');
+}
+
 function createSection(title, text) {
     const container = document.createElement('div');
     container.className = 'mb-3';
@@ -1878,7 +1923,11 @@ function saveData() {
         purchaseOrders,
         productionHistory,
         weekCalculationMode,
-        customWeeklyCapacities
+        customWeeklyCapacities,
+        customWeeklyBarrilDemand,
+        customWeeklyForecastLiters,
+        customWeeklyOverflowBottles,
+        customWeeklyOverflowLiters
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -2248,20 +2297,20 @@ function switchProductionTab(tabId) {
     const btnPlaneacion = document.getElementById('tab-btn-planeacion');
 
     // Hide all
-    tabNueva.classList.add('hidden');
+    if (tabNueva) tabNueva.classList.add('hidden');
     tabSeguimiento.classList.add('hidden');
     if (tabSemanal) tabSemanal.classList.add('hidden');
     if (tabPlaneacion) tabPlaneacion.classList.add('hidden');
     
     // Reset buttons
-    btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
+    if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     btnSeguimiento.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
 
     if (tabId === 'nueva') {
-        tabNueva.classList.remove('hidden');
-        btnNueva.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
+        if (tabNueva) tabNueva.classList.remove('hidden');
+        if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
         updateWizardProductSelect();
         updateWizardTankSelect();
     } else if (tabId === 'seguimiento') {
