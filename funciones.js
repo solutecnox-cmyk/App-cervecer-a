@@ -322,6 +322,7 @@ function saveProduct(event) {
         supplierId: document.getElementById('product-supplier').value || null,
         quantity: parseFloat(document.getElementById('product-quantity').value),
         volumePerUnit: parseFloat(document.getElementById('product-volume').value) || 1,
+        unitType: document.getElementById('product-unit-type').value || 'und',
         safetyStock: parseFloat(document.getElementById('product-safety-stock').value) || 0,
     };
     inventory.push(newProduct);
@@ -343,7 +344,7 @@ function loadInventory() {
         const rawMaterials = inventory.filter(p => p.type === 'raw');
 
         if (finalProducts.length === 0) {
-            tbodyFinal.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-500">No hay productos finales registrados.</td></tr>';
+            tbodyFinal.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay productos finales registrados.</td></tr>';
         } else {
             finalProducts.forEach(product => {
                 const row = tbodyFinal.insertRow();
@@ -353,6 +354,7 @@ function loadInventory() {
                     <td class="p-3 border-b">${product.name}</td>
                     <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
                     <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
+                    <td class="p-3 border-b">${product.unitType || 'und'}</td>
                     <td class="p-3 border-b">
                         <button onclick="adjustStock(${product.id})" class="text-blue-600 hover:text-blue-800 mr-3" title="Ajustar Inventario"><i class="fas fa-edit"></i></button>
                         <button onclick="deleteProduct(${product.id})" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fas fa-trash"></i></button>
@@ -362,7 +364,7 @@ function loadInventory() {
         }
 
         if (rawMaterials.length === 0) {
-            tbodyRaw.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
+            tbodyRaw.innerHTML = '<tr><td colspan="8" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
         } else {
             rawMaterials.forEach(product => {
                 const row = tbodyRaw.insertRow();
@@ -375,6 +377,7 @@ function loadInventory() {
                     <td class="p-3 border-b">${product.name}</td>
                     <td class="p-3 border-b">$${product.price.toFixed(2)}</td>
                     <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
+                    <td class="p-3 border-b">${product.unitType || 'und'}</td>
                     <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? product.safetyStock : '-'}</td>
                     <td class="p-3 border-b text-xs">${supplierName}</td>
                     <td class="p-3 border-b">
@@ -1025,9 +1028,31 @@ function deleteTank(tankId) {
     showNotification('Tanque eliminado.', 'success');
 }
 
+function hasActiveProduction() {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return tanks.some(t => (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr));
+}
+
+function renderPlaneacionPlaceholder() {
+    const mpsContainer = document.getElementById('mps-table-container');
+    const mrpContainer = document.getElementById('mrp-table-container');
+    const kpiContainer = document.getElementById('kpi-container');
+    const out = document.getElementById('production-output');
+    const message = `<div class="text-gray-500 italic p-6 border rounded-lg bg-gray-50 text-center">No hay producción activa en este momento. Inicia una producción para ver los cálculos de MPS/MRP.</div>`;
+    if (mpsContainer) mpsContainer.innerHTML = message;
+    if (mrpContainer) mrpContainer.innerHTML = '';
+    if (kpiContainer) kpiContainer.innerHTML = '';
+    if (out) out.innerHTML = '';
+}
+
 // --- Production Flow: MPS -> MRP -> CRP ---
 function runProductionFlow() {
     const out = document.getElementById('production-output');
+    if (!hasActiveProduction()) {
+        renderPlaneacionPlaceholder();
+        if (out) out.innerHTML = '<div class="text-gray-600 italic">No hay producción activa. Inicia producción para habilitar la planeación MPS/MRP.</div>';
+        return;
+    }
     out.innerHTML = '<div class="text-blue-600 font-bold"><i class="fas fa-spinner fa-spin mr-2"></i> Calculando Plan Maestro de Producción y Requerimientos...</div>';
     
     const mpsContainer = document.getElementById('mps-table-container');
@@ -1905,6 +1930,11 @@ function switchProductionTab(tabId) {
     } else if (tabId === 'planeacion') {
         if (tabPlaneacion) tabPlaneacion.classList.remove('hidden');
         if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
+        if (hasActiveProduction()) {
+            runProductionFlow();
+        } else {
+            renderPlaneacionPlaceholder();
+        }
     }
 }
 
