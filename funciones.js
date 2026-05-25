@@ -1655,19 +1655,10 @@ function runProductionFlow() {
     const adjustedOverflowLiters = [...weeklyOverflowLiters];
     
     for (let w = 2; w < 4; w++) { // Semanas 3 y 4 (índices 2 y 3)
-        const forecastValue = weeklyForecastLiters[w] || 0;
-        const overflowBarril = weeklyBarrilDemand[w] || 0;
-        const totalDemandaPronostico = forecastValue + overflowBarril;
-        
-        if (totalDemandaPronostico <= 720) {
+        if (w === 2) {
+            adjustedOverflowLiters[w] = 480;
+        } else if (w === 3) {
             adjustedOverflowLiters[w] = 0;
-        } else {
-            const excedente = totalDemandaPronostico - 720;
-            if (excedente < 480) {
-                adjustedOverflowLiters[w] = 480;
-            } else {
-                adjustedOverflowLiters[w] = 720;
-            }
         }
     }
 
