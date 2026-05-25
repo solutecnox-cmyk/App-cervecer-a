@@ -35,6 +35,35 @@ function getProductVolumePerUnit(product) {
     return product?.volumePerUnit || LITERS_PER_BOTTLE;
 }
 
+function getWeekIndexFromToday(dateStr) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const date = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(date)) return 0;
+    const diffDays = Math.floor((date - today) / (1000 * 60 * 60 * 24));
+    return Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+}
+
+function getFinishedProductStockLiters(productId) {
+    const product = inventory.find(p => p.id === productId);
+    if (!product || product.type === 'raw') return 0;
+    return (product.quantity || 0) * getProductVolumePerUnit(product);
+}
+
+function getWeeklyForecastLitersForPlanning() {
+    if (weeklyDemandOverridesActive) {
+        return customWeeklyForecastLiters.map(v => Number(v) || 0);
+    }
+    return computeWeeklyDemandFromOrders().forecastL;
+}
+
+function getWeeklyBarrilLitersForPlanning() {
+    if (weeklyDemandOverridesActive) {
+        return customWeeklyBarrilDemand.map(v => Number(v) || 0);
+    }
+    return computeWeeklyDemandFromOrders().barril;
+}
+
 let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
 let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
 
@@ -1938,6 +1967,7 @@ function editPlanningDemand(productId, weekIndex) {
 
     saveData();
     refreshAppUI();
+    renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
     showNotification('Demanda actualizada y plan recalculado con éxito.', 'success');
 }
@@ -2743,6 +2773,7 @@ function saveWeeklyDemandAdjustment() {
     weeklyDemandOverridesActive = true;
     saveData();
     renderWeeklyDemandAdjustment();
+    renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
     showNotification('Demanda semanal guardada. Las tablas MPS/MRP se actualizaron.', 'success');
 }
@@ -2754,6 +2785,7 @@ function importWeeklyDemandFromOrders() {
     weeklyDemandOverridesActive = true;
     saveData();
     renderWeeklyDemandAdjustment();
+    renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
     showNotification('Valores importados desde pedidos fijos y pronósticos registrados.', 'success');
 }
@@ -2877,49 +2909,136 @@ function renderWeeklyProductionTab() {
         historyEditor.innerHTML = html;
     }
 
-    const forecastsByWeek = forecasts.map(f => {
-        const product = inventory.find(p => p.id === f.productId);
-        const week = getWeekLabel(f.targetDate);
-        const stock = product ? product.quantity || 0 : 0;
-        const remaining = Math.max(0, f.qty - stock);
+    renderForecastAdjustmentTable(forecastContainer);
+}
+
+function renderForecastAdjustmentTable(container) {
+    if (!container) return;
+
+    const finalProducts = inventory.filter(p => p.type !== 'raw');
+    const stockByProduct = {};
+    finalProducts.forEach(p => {
+        stockByProduct[p.id] = getFinishedProductStockLiters(p.id);
+    });
+
+    const detailRows = forecasts
+        .map(f => {
+            const product = inventory.find(p => p.id === f.productId);
+            if (!product || product.type === 'raw') return null;
+            const weekIndex = getWeekIndexFromToday(f.targetDate);
+            const forecastLiters = f.qty * getProductVolumePerUnit(product);
+            return {
+                weekIndex,
+                weekLabel: `Semana ${weekIndex + 1}`,
+                productId: f.productId,
+                productName: product.name,
+                forecastLiters,
+                forecastUnits: f.qty,
+                targetDate: f.targetDate
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.weekIndex - b.weekIndex || a.productName.localeCompare(b.productName));
+
+    const rollingStock = { ...stockByProduct };
+    const productRows = detailRows.map(row => {
+        const stockAvail = rollingStock[row.productId] || 0;
+        const adjustedLiters = Math.max(0, row.forecastLiters - stockAvail);
+        const covers = row.forecastLiters > 0 && stockAvail >= row.forecastLiters;
+        rollingStock[row.productId] = Math.max(0, stockAvail - row.forecastLiters);
+        return { ...row, stockLiters: stockAvail, adjustedLiters, covers };
+    });
+
+    const weeklyForecastL = getWeeklyForecastLitersForPlanning();
+    const initialInvLiters = finalProducts.reduce((sum, p) => sum + getFinishedProductStockLiters(p.id), 0);
+    let rollingInvGlobal = initialInvLiters;
+    const weeklySummaryRows = [0, 1, 2, 3].map(w => {
+        const forecastL = weeklyForecastL[w] || 0;
+        const stockBefore = rollingInvGlobal;
+        const adjustedL = Math.max(0, forecastL - stockBefore);
+        const covers = forecastL > 0 && stockBefore >= forecastL;
+        rollingInvGlobal = Math.max(0, stockBefore - forecastL);
         return {
-            week,
-            productName: product ? product.name : 'Producto desconocido',
-            forecastQty: f.qty,
-            finishedStock: stock,
-            remainingQty: remaining,
-            targetDate: f.targetDate
+            weekLabel: `Semana ${w + 1}`,
+            forecastL,
+            stockLiters: stockBefore,
+            adjustedL,
+            covers
         };
     });
 
-    if (forecastsByWeek.length === 0) {
-        forecastContainer.innerHTML = '<p class="text-gray-500 italic p-4">No hay pronósticos registrados para ajustar con el inventario de producto terminado.</p>';
-    } else {
-        let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+    let html = '';
+
+    if (productRows.length > 0) {
+        html += `<p class="text-xs text-gray-600 mb-2">Detalle por producto (desde pronósticos registrados). Stock PT se consume en orden de semana.</p>
+            <table class="w-full text-left border-collapse border border-gray-200 text-sm mb-6">
             <thead class="bg-gray-50">
                 <tr>
                     <th class="p-2 border">Semana</th>
                     <th class="p-2 border">Producto</th>
-                    <th class="p-2 border">Pronóstico</th>
-                    <th class="p-2 border">Stock PT disponible</th>
-                    <th class="p-2 border">Pronóstico ajustado</th>
-                    <th class="p-2 border">Fecha objetivo</th>
+                    <th class="p-2 border text-center">Pronóstico (L)</th>
+                    <th class="p-2 border text-center">Stock PT disp. (L)</th>
+                    <th class="p-2 border text-center">Pronóstico ajustado (L)</th>
+                    <th class="p-2 border text-center">Estado</th>
+                    <th class="p-2 border text-center">Fecha</th>
                 </tr>
             </thead>
             <tbody>`;
-        forecastsByWeek.forEach(row => {
+        productRows.forEach(row => {
             html += `<tr>
-                <td class="p-2 border">${row.week}</td>
+                <td class="p-2 border font-semibold">${row.weekLabel}</td>
                 <td class="p-2 border">${row.productName}</td>
-                <td class="p-2 border">${formatDecimal(row.forecastQty)}</td>
-                <td class="p-2 border">${formatDecimal(row.finishedStock)}</td>
-                <td class="p-2 border">${formatDecimal(row.remainingQty)}</td>
-                <td class="p-2 border">${row.targetDate}</td>
+                <td class="p-2 border text-center">${formatDecimal(row.forecastLiters)} L<br><span class="text-xs text-gray-500">${formatDecimal(row.forecastUnits)} und</span></td>
+                <td class="p-2 border text-center">${formatDecimal(row.stockLiters)} L</td>
+                <td class="p-2 border text-center font-semibold ${row.covers ? 'text-blue-600' : 'text-amber-700'}">${formatDecimal(row.adjustedLiters)} L</td>
+                <td class="p-2 border text-center text-xs">${row.covers ? '<span class="text-blue-600 font-semibold">Inv. cubre demanda</span>' : (row.forecastLiters > 0 ? 'Requiere producción' : '—')}</td>
+                <td class="p-2 border text-center text-xs">${row.targetDate}</td>
             </tr>`;
         });
         html += '</tbody></table>';
-        forecastContainer.innerHTML = html;
     }
+
+    html += `<p class="text-xs text-gray-600 mb-2">Resumen consolidado por semana (alineado con planeación MPS/MRP y demanda semanal guardada).</p>
+        <table class="w-full text-left border-collapse border border-gray-200 text-sm">
+        <thead class="bg-[#005B3A] text-white">
+            <tr>
+                <th class="p-2 border">Semana</th>
+                <th class="p-2 border text-center">Pronóstico ventas (L)</th>
+                <th class="p-2 border text-center">Inv. PT disponible (L)</th>
+                <th class="p-2 border text-center">Pronóstico ajustado (L)</th>
+                <th class="p-2 border text-center">Inv. PT (bot)</th>
+                <th class="p-2 border text-center">Estado</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
+    weeklySummaryRows.forEach(row => {
+        html += `<tr class="bg-gray-50">
+            <td class="p-2 border font-bold">${row.weekLabel}</td>
+            <td class="p-2 border text-center">${formatDecimal(row.forecastL)} L</td>
+            <td class="p-2 border text-center text-blue-700">${formatDecimal(row.stockLiters)} L</td>
+            <td class="p-2 border text-center font-semibold ${row.covers ? 'text-blue-600' : 'text-amber-700'}">${formatDecimal(row.adjustedL)} L</td>
+            <td class="p-2 border text-center text-gray-600">${litersToBottles(row.stockLiters)} bot</td>
+            <td class="p-2 border text-center text-xs">${row.covers ? '<span class="text-blue-600 font-semibold">Inv. cubre demanda</span>' : (row.forecastL > 0 ? 'Requiere producción' : 'Sin pronóstico')}</td>
+        </tr>`;
+    });
+
+    const totalForecast = weeklyForecastL.reduce((a, b) => a + b, 0);
+    html += `<tr class="bg-gray-100 font-bold">
+            <td class="p-2 border">Total mes</td>
+            <td class="p-2 border text-center">${formatDecimal(totalForecast)} L</td>
+            <td class="p-2 border text-center">${formatDecimal(initialInvLiters)} L</td>
+            <td class="p-2 border text-center">—</td>
+            <td class="p-2 border text-center">${litersToBottles(initialInvLiters)} bot</td>
+            <td class="p-2 border text-center text-xs text-gray-500">Inventario inicial PT</td>
+        </tr>
+    </tbody></table>`;
+
+    if (productRows.length === 0 && totalForecast === 0) {
+        html = `<p class="text-gray-500 italic p-4 mb-3">No hay pronóstico en litros para las 4 semanas. Registra pronósticos en Planeación (celdas MPS) o completa la tabla <strong>Demanda semanal para planeación</strong> y pulsa Guardar.</p>` + html;
+    }
+
+    container.innerHTML = html;
 }
 
 function updateWeeklyProductionProductSelect() {
