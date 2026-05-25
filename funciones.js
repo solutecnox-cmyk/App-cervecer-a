@@ -1208,7 +1208,7 @@ function loadTanks() {
         let statusText = 'Libre';
 
         // Check active schedule (started and not yet finalized)
-        const activeSchedule = (tank.schedule || []).find(s => {
+        let activeSchedule = (tank.schedule || []).find(s => {
             return s.start <= todayStr;
         });
 
@@ -1221,6 +1221,15 @@ function loadTanks() {
             } else {
                 statusBgColor = 'bg-amber-500';
                 statusText = `Fermentando:<br>${prod ? prod.name : 'Prod.'}`;
+            }
+        } else {
+            // Check if there is a future schedule
+            const futureSchedule = (tank.schedule || []).find(s => s.start > todayStr);
+            if (futureSchedule) {
+                const prod = inventory.find(p => p.id === futureSchedule.productId);
+                statusBgColor = 'bg-blue-500';
+                statusText = `Reservado:<br>${prod ? prod.name : 'Prod.'}`;
+                activeSchedule = futureSchedule; // To show the tooltip info
             }
         }
 
@@ -1254,7 +1263,11 @@ function loadTanks() {
             <div class="absolute top-full mt-1 hidden group-hover:block w-48 p-2 bg-white border border-gray-300 shadow-lg rounded text-xs z-50 text-center">
                 <div class="font-bold border-b pb-1 mb-1">${tank.name}</div>
                 <div>Capacidad: ${tank.capacityLiters}L</div>
-                ${activeSchedule ? `<div class="${todayStr > activeSchedule.end ? 'text-green-600 font-bold' : 'text-amber-600'} mt-1">${todayStr > activeSchedule.end ? 'Listo para Finalizar' : `Fin: ${activeSchedule.end}`}</div>` : ''}
+                ${activeSchedule ? `
+                    <div class="mt-1 font-semibold text-gray-700">
+                        ${activeSchedule.start > todayStr ? `Inicia: ${activeSchedule.start}` : todayStr > activeSchedule.end ? '<span class="text-green-600">Listo para Finalizar</span>' : `Fin: ${activeSchedule.end}`}
+                    </div>
+                ` : ''}
             </div>
         `;
         div.onclick = () => openTankInfoModal(tank.id);
@@ -1273,9 +1286,7 @@ function deleteTank(tankId) {
 }
 
 function hasActiveProduction() {
-    const todayStr = getLocalDateStr();
-    const hasTanksActive = tanks.some(t => (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr));
-    return hasTanksActive || productionHistory.length > 0;
+    return true;
 }
 
 function renderPlaneacionPlaceholder() {
@@ -1346,34 +1357,57 @@ function runProductionFlow() {
     // 1. Preparar Demanda por Semana (1 a 4)
     const demandBarril = {}; // Litros por semana
     const demandBotellas = {}; // Unidades por semana
-    let weeklyBarrilDemand = [...customWeeklyBarrilDemand];
+    let weeklyBarrilDemand = [0, 0, 0, 0];
     let weeklyForecastBottles = [0, 0, 0, 0];
-    let weeklyForecastLiters = [...customWeeklyForecastLiters];
+    let weeklyForecastLiters = [0, 0, 0, 0];
     let weeklyProducedLiters = [0, 0, 0, 0];
-    let weeklyOverflowBottles = [...customWeeklyOverflowBottles];
-    let weeklyOverflowLiters = [...customWeeklyOverflowLiters];
+    let weeklyOverflowBottles = [0, 0, 0, 0];
+    let weeklyOverflowLiters = [0, 0, 0, 0];
+
+    // Cargar valores manuales o ajustes directos
+    for (let w = 0; w < 4; w++) {
+        weeklyBarrilDemand[w] = customWeeklyBarrilDemand[w] || 0;
+        weeklyForecastLiters[w] = customWeeklyForecastLiters[w] || 0;
+        weeklyOverflowBottles[w] = customWeeklyOverflowBottles[w] || 0;
+        weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w] || 0;
+    }
 
     finalProducts.forEach(p => {
         demandBarril[p.id] = [0, 0, 0, 0];
         demandBotellas[p.id] = [0, 0, 0, 0];
     });
 
-    // Agregar pedidos reales por producto (se usan en detalles del MPS de cada sabor)
+    // Agregar pedidos reales por producto
     orders.forEach(o => {
         const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBarril[o.productId]) {
             const volume = o.qty * (inventory.find(p=>p.id===o.productId)?.volumePerUnit || 1);
             demandBarril[o.productId][w] += volume;
+            weeklyBarrilDemand[w] += volume;
         }
     });
 
+    // Agregar pronósticos reales
     forecasts.forEach(f => {
         const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBotellas[f.productId]) {
             demandBotellas[f.productId][w] += f.qty;
             weeklyForecastBottles[w] += f.qty;
+            const volumePerUnit = inventory.find(p=>p.id===f.productId)?.volumePerUnit || 0.33;
+            weeklyForecastLiters[w] += f.qty * volumePerUnit;
+        }
+    });
+
+    // Agregar Pedidos Fijos y Overflow del historial (productionHistory)
+    productionHistory.forEach(hist => {
+        const wIdx = getWeekIndexForHistoryEntry(hist);
+        if (wIdx >= 0 && wIdx <= 3) {
+            weeklyBarrilDemand[wIdx] += hist.fixedOrders || 0;
+            weeklyOverflowBottles[wIdx] += hist.overflowBottles || 0;
+            const volumePerUnit = inventory.find(p => p.id === hist.productId)?.volumePerUnit || 0.33;
+            weeklyOverflowLiters[wIdx] += (hist.overflowBottles || 0) * volumePerUnit;
         }
     });
 
@@ -1410,8 +1444,9 @@ function runProductionFlow() {
         invProjectedPT[p.id] = [0, 0, 0, 0];
     });
 
-    // Rellenar producción real desde historial de producción semanal
+    // Rellenar producción real desde historial de producción semanal (solo no activos para evitar doble conteo)
     productionHistory.forEach(hist => {
+        if (hist.isActive === true) return;
         const wIdx = getWeekIndexForHistoryEntry(hist);
         if (wIdx >= 0 && wIdx <= 3 && mpsPlan[hist.productId]) {
             mpsPlan[hist.productId][wIdx] += hist.qtyLiters || 0;
@@ -1614,10 +1649,11 @@ function runProductionFlow() {
     }
 
     const volumeTable = document.getElementById('production-volume-table');
+    const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
     const demandTable = document.getElementById('production-demand-table');
     const inventoryTable = document.getElementById('production-inventory-table');
 
-    if(volumeTable) {
+    if(volumeTable || weeklyVolumeTable) {
         const monthlyCapacity = customWeeklyCapacities.reduce((a, b) => a + b, 0);
         const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
         const overflowTotalBottles = weeklyOverflowBottles.reduce((a,b)=>a+b,0);
@@ -1625,7 +1661,7 @@ function runProductionFlow() {
         const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
         const producedTotal = weeklyProducedLiters.reduce((a,b)=>a+b,0);
 
-        volumeTable.innerHTML = `
+        const tableHtml = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
                 <thead class="bg-[#005B3A] text-white">
                     <tr>
@@ -1692,6 +1728,9 @@ function runProductionFlow() {
                 </tbody>
             </table>
         `;
+
+        if (volumeTable) volumeTable.innerHTML = tableHtml;
+        if (weeklyVolumeTable) weeklyVolumeTable.innerHTML = tableHtml;
     }
 
     if(demandTable) {
@@ -2041,9 +2080,10 @@ function refreshAppUI() {
     updateWizardTankSelect();
     renderTrackingActive();
     renderTrackingHistory();
-    if (!document.getElementById('tab-planeacion')?.classList.contains('hidden')) {
-        runProductionFlow();
-    }
+    
+    // Ejecutar flujo de producción de forma incondicional
+    runProductionFlow();
+
     if (!document.getElementById('tab-semanal')?.classList.contains('hidden')) {
         renderWeeklyProductionTab();
     }
@@ -2172,7 +2212,13 @@ function openTankInfoModal(id) {
     const content = document.getElementById('tank-info-content');
     
     const todayStr = getLocalDateStr();
-    const activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr);
+    let activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr);
+    let isFuture = false;
+
+    if (!activeSchedule) {
+        activeSchedule = (tank.schedule || []).find(s => s.start > todayStr);
+        if (activeSchedule) isFuture = true;
+    }
 
     let html = `<p class="text-lg"><strong>Capacidad Total:</strong> ${tank.capacityLiters} L</p>`;
 
@@ -2193,27 +2239,42 @@ function openTankInfoModal(id) {
         const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
         const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
         
-        const isOverdue = todayStr > activeSchedule.end;
-        html += `
-            <div class="mt-4 p-4 ${isOverdue ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'} rounded-md border">
-                <h3 class="font-bold ${isOverdue ? 'text-green-800' : 'text-amber-800'} text-lg mb-2"><i class="fas fa-flask"></i> ${isOverdue ? 'Proceso Completado' : 'Proceso en Curso'}</h3>
-                <p><strong>Producto:</strong> ${prodName}</p>
-                <p><strong>Volumen en Proceso:</strong> ${activeSchedule.qty} L</p>
-                <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
-                <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
-                <p><strong>Fin Embazado:</strong> ${bottlingEnd} (${bottlingDays} días)</p>
-                <p><strong>Fin Empaquetado:</strong> ${packagingEnd} (${packagingDays} días)</p>
-                <p class="mt-2 font-semibold text-gray-700">Fecha Estimada de Fin Total: ${activeSchedule.end}</p>
+        if (isFuture) {
+            const daysToStart = diffDays(todayStr, activeSchedule.start);
+            html += `
+                <div class="mt-4 p-4 bg-blue-50 rounded-md border border-blue-200">
+                    <h3 class="font-bold text-blue-800 text-lg mb-2"><i class="fas fa-calendar-alt"></i> Lote Programado</h3>
+                    <p><strong>Producto:</strong> ${prodName}</p>
+                    <p><strong>Volumen Planificado:</strong> ${activeSchedule.qty} L</p>
+                    <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
+                    <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
+                    <p><strong>Tiempos:</strong> Embazado: ${bottlingDays}d | Empaquetado: ${packagingDays}d</p>
+                    <p class="mt-2 font-semibold text-blue-700 text-sm">Inicia en ${daysToStart} día(s) (${activeSchedule.start})</p>
+                </div>
+            `;
+        } else {
+            const isOverdue = todayStr > activeSchedule.end;
+            html += `
+                <div class="mt-4 p-4 ${isOverdue ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'} rounded-md border">
+                    <h3 class="font-bold ${isOverdue ? 'text-green-800' : 'text-amber-800'} text-lg mb-2"><i class="fas fa-flask"></i> ${isOverdue ? 'Proceso Completado' : 'Proceso en Curso'}</h3>
+                    <p><strong>Producto:</strong> ${prodName}</p>
+                    <p><strong>Volumen en Proceso:</strong> ${activeSchedule.qty} L</p>
+                    <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
+                    <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
+                    <p><strong>Fin Embazado:</strong> ${bottlingEnd} (${bottlingDays} días)</p>
+                    <p><strong>Fin Empaquetado:</strong> ${packagingEnd} (${packagingDays} días)</p>
+                    <p class="mt-2 font-semibold text-gray-700">Fecha Estimada de Fin Total: ${activeSchedule.end}</p>
 
-                <div class="mt-4 text-sm font-semibold ${isOverdue ? 'text-green-700' : 'text-amber-700'} flex justify-between">
-                    <span>${isOverdue ? 'Completado' : `Día ${elapsedDays} de ${totalDays}`}</span>
-                    <span>${progress.toFixed(0)}%</span>
+                    <div class="mt-4 text-sm font-semibold ${isOverdue ? 'text-green-700' : 'text-amber-700'} flex justify-between">
+                        <span>${isOverdue ? 'Completado' : `Día ${elapsedDays} de ${totalDays}`}</span>
+                        <span>${progress.toFixed(0)}%</span>
+                    </div>
+                    <div class="w-full ${isOverdue ? 'bg-green-200' : 'bg-amber-200'} rounded-full h-3 mt-1 overflow-hidden">
+                      <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-3 rounded-full transition-all duration-1000" style="width: ${progress}%"></div>
+                    </div>
                 </div>
-                <div class="w-full ${isOverdue ? 'bg-green-200' : 'bg-amber-200'} rounded-full h-3 mt-1 overflow-hidden">
-                  <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-3 rounded-full transition-all duration-1000" style="width: ${progress}%"></div>
-                </div>
-            </div>
-        `;
+            `;
+        }
 
         // Ingredientes implementados
         const recipe = recipes.find(r => r.productId === activeSchedule.productId);
@@ -2232,7 +2293,13 @@ function openTankInfoModal(id) {
             html += `</ul></div>`;
         }
         
-        html += `<button onclick="openTankScheduleForm(${tank.id}, true)" class="mt-4 px-4 py-2 w-full bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors font-bold"><i class="fas fa-edit mr-2"></i> Editar Lote Actual</button>`;
+        const scheduleIdx = (tank.schedule || []).indexOf(activeSchedule);
+        html += `
+            <div class="flex gap-2 mt-4">
+                ${!isFuture ? `<button onclick="finishProduction(${tank.id}, ${scheduleIdx})" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-bold"><i class="fas fa-flag-checkered mr-2"></i> Finalizar Ciclo</button>` : ''}
+                <button onclick="openTankScheduleForm(${tank.id}, true)" class="flex-1 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors font-bold"><i class="fas fa-edit mr-2"></i> Editar Lote</button>
+            </div>
+        `;
 
     } else {
         html += `
@@ -2731,11 +2798,20 @@ function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-fermentation-days').value = '8';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
+    document.getElementById('weekly-edit-fixed-orders').value = '0';
+    document.getElementById('weekly-edit-overflow-bottles').value = '0';
     const statusDiv = document.getElementById('weekly-mrp-status');
     if (statusDiv) {
         statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>';
     }
     document.getElementById('weekly-edit-id')?.remove();
+
+    // Reset submit button text
+    const submitBtn = document.getElementById('weekly-submit-btn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Iniciar Producción Activa';
+    }
+
     updateWeeklyEditTankSelect();
 }
 
@@ -2754,69 +2830,6 @@ function openWeeklyProductionHistoryEditor(weekLabel, productId) {
     editWeeklyProductionEntry(entry.id);
 }
 
-function saveWeeklyProductionEntry() {
-    const productId = parseInt(document.getElementById('weekly-edit-product').value);
-    const dateInput = document.getElementById('weekly-edit-date').value;
-    const weekSelect = document.getElementById('weekly-edit-week').value;
-    const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
-    const tankName = document.getElementById('weekly-edit-tank').value || 'Manual';
-    const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value, 10) || 8;
-    const liters = parseFloat(document.getElementById('weekly-edit-liters').value);
-    const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
-    
-    if (!productId || !dateInput || isNaN(liters) || liters <= 0) {
-        return showNotification('Selecciona producto, fecha y cantidad válida (Litros).', 'error');
-    }
-    
-    const product = inventory.find(p => p.id === productId);
-    const unitVolume = product?.volumePerUnit || 0.33;
-    const qtyUnits = !isNaN(unitsInput) && unitsInput > 0 ? unitsInput : Math.round(liters / unitVolume);
-
-    // Calculate endDate from startDate and fermentationDays
-    const start = new Date(`${dateInput}T00:00:00`);
-    const end = new Date(start.getTime() + fermentationDays * 24 * 60 * 60 * 1000);
-    const endDate = getLocalDateStr(end);
-
-    const existingIdInput = document.getElementById('weekly-edit-id');
-    if (existingIdInput && existingIdInput.value) {
-        const entryId = parseInt(existingIdInput.value);
-        const entry = productionHistory.find(hist => hist.id === entryId);
-        if (entry) {
-            entry.productId = productId;
-            entry.qtyLiters = liters;
-            entry.qtyUnits = qtyUnits;
-            entry.startDate = dateInput;
-            entry.endDate = endDate;
-            entry.week = weekVal;
-            entry.tankName = tankName;
-            entry.fermentationDays = fermentationDays;
-            saveData();
-            refreshAppUI();
-            resetWeeklyProductionForm();
-            renderWeeklyProductionTab();
-            showNotification('Registro de producción actualizado.', 'success');
-            return;
-        }
-    }
-
-    productionHistory.unshift({
-        id: Date.now(),
-        productId,
-        qtyLiters: liters,
-        qtyUnits,
-        startDate: dateInput,
-        endDate: endDate,
-        week: weekVal,
-        tankName: tankName,
-        fermentationDays: fermentationDays
-    });
-    saveData();
-    refreshAppUI();
-    resetWeeklyProductionForm();
-    renderWeeklyProductionTab();
-    showNotification('Registro de producción semanal agregado.', 'success');
-}
-
 function editWeeklyProductionEntry(entryId) {
     const entry = productionHistory.find(hist => hist.id === entryId);
     if (!entry) return;
@@ -2825,6 +2838,8 @@ function editWeeklyProductionEntry(entryId) {
     document.getElementById('weekly-edit-week').value = entry.week || '';
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
+    document.getElementById('weekly-edit-fixed-orders').value = entry.fixedOrders != null ? formatDecimal(entry.fixedOrders) : '0';
+    document.getElementById('weekly-edit-overflow-bottles').value = entry.overflowBottles != null ? formatDecimal(entry.overflowBottles) : '0';
 
     // Load tank select
     updateWeeklyEditTankSelect();
@@ -2852,11 +2867,24 @@ function editWeeklyProductionEntry(entryId) {
         document.body.appendChild(hidden);
     }
     hidden.value = entry.id;
+
+    // Cambiar la etiqueta del botón principal a Guardar Cambios
+    const submitBtn = document.getElementById('weekly-submit-btn');
+    if (submitBtn) {
+        submitBtn.textContent = 'Guardar Cambios';
+    }
+
     weeklyProductionCheckIngredients();
 }
 
 function deleteWeeklyProductionEntry(entryId) {
     if (!confirm('¿Eliminar este registro de producción? Esta acción no se puede deshacer.')) return;
+    
+    // Si hay un lote activo asociado en algún tanque, eliminarlo también del tanque
+    tanks.forEach(t => {
+        t.schedule = (t.schedule || []).filter(s => s.id !== entryId);
+    });
+
     productionHistory = productionHistory.filter(hist => hist.id !== entryId);
     saveData();
     refreshAppUI();
@@ -2944,6 +2972,12 @@ function startWeeklyProductionActive() {
     const dateInput = document.getElementById('weekly-edit-date').value;
     const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value) || 8;
     
+    const fixedOrders = parseFloat(document.getElementById('weekly-edit-fixed-orders').value) || 0;
+    const overflowBottles = parseInt(document.getElementById('weekly-edit-overflow-bottles').value, 10) || 0;
+    
+    const weekSelect = document.getElementById('weekly-edit-week').value;
+    const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
+
     if (!prodId || isNaN(liters) || liters <= 0 || !dateInput) {
         return showNotification('Por favor, selecciona producto, fecha y cantidad válida (Litros).', 'error');
     }
@@ -2958,8 +2992,15 @@ function startWeeklyProductionActive() {
         return showNotification('Tanque no encontrado.', 'error');
     }
 
-    // Verificar si el tanque está ocupado en la fecha especificada
-    const isOccupied = (tank.schedule || []).some(s => dateInput >= s.start && dateInput <= s.end);
+    const existingIdInput = document.getElementById('weekly-edit-id');
+    const isEdit = existingIdInput && existingIdInput.value;
+    const entryId = isEdit ? parseInt(existingIdInput.value, 10) : Date.now();
+
+    // Verificar si el tanque está ocupado en la fecha especificada (excluyendo el lote que estamos editando)
+    const isOccupied = (tank.schedule || []).some(s => {
+        if (isEdit && s.id === entryId) return false;
+        return dateInput >= s.start && dateInput <= s.end;
+    });
     if (isOccupied) {
         return showNotification(`El tanque ${tank.name} ya está ocupado en la fecha seleccionada.`, 'error');
     }
@@ -2968,19 +3009,53 @@ function startWeeklyProductionActive() {
         return showNotification(`La cantidad (${liters}L) supera la capacidad del tanque (${tank.capacityLiters}L).`, 'error');
     }
 
+    // Si es edición, devolvemos temporalmente el stock del lote original antes de validar la materia prima
+    if (isEdit) {
+        const oldEntry = productionHistory.find(hist => hist.id === entryId);
+        if (oldEntry) {
+            const oldRecipe = recipes.find(r => r.productId === oldEntry.productId);
+            if (oldRecipe) {
+                oldRecipe.ingredients.forEach(ing => {
+                    const raw = inventory.find(p => p.id === ing.ingredientProductId);
+                    if (raw) {
+                        raw.quantity += (ing.qtyPerUnit * oldEntry.qtyLiters);
+                    }
+                });
+            }
+        }
+    }
+
+    // Verificar stock con los ingredientes devueltos
     if (!weeklyProductionCheckIngredients()) {
+        // Si no hay suficiente stock, revertir el incremento temporal de materia prima
+        if (isEdit) {
+            const oldEntry = productionHistory.find(hist => hist.id === entryId);
+            if (oldEntry) {
+                const oldRecipe = recipes.find(r => r.productId === oldEntry.productId);
+                if (oldRecipe) {
+                    oldRecipe.ingredients.forEach(ing => {
+                        const raw = inventory.find(p => p.id === ing.ingredientProductId);
+                        if (raw) {
+                            raw.quantity -= (ing.qtyPerUnit * oldEntry.qtyLiters);
+                        }
+                    });
+                }
+            }
+        }
         return showNotification('Stock insuficiente de materia prima. Revisa la Verificación MRP.', 'error');
     }
 
-    // Descontar inventario
-    const recipe = recipes.find(r => r.productId === prodId);
     const product = inventory.find(p => p.id === prodId);
-    const totalUnits = product && product.volumePerUnit ? (liters / product.volumePerUnit) : liters;
+    const unitVolume = product?.volumePerUnit || 0.33;
+    const unitsInput = parseFloat(document.getElementById('weekly-edit-units').value);
+    const qtyUnits = !isNaN(unitsInput) && unitsInput > 0 ? unitsInput : Math.round(liters / unitVolume);
 
+    // Descontar inventario (usar litros directamente en lugar de botellas)
+    const recipe = recipes.find(r => r.productId === prodId);
     recipe.ingredients.forEach(ing => {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
         if (raw) {
-            raw.quantity -= (ing.qtyPerUnit * totalUnits);
+            raw.quantity -= (ing.qtyPerUnit * liters);
         }
     });
 
@@ -2990,9 +3065,9 @@ function startWeeklyProductionActive() {
     const packagingDays = 1;
     const totalDays = fermentationDays + bottlingDays + packagingDays;
     const endDate = addDays(startDate, totalDays);
-    
-    tank.schedule = tank.schedule || [];
-    tank.schedule.push({
+
+    const scheduleEntry = {
+        id: entryId,
         start: startDate,
         end: endDate,
         productId: prodId,
@@ -3003,12 +3078,79 @@ function startWeeklyProductionActive() {
         fermentationEnd: addDays(startDate, fermentationDays),
         bottlingEnd: addDays(addDays(startDate, fermentationDays), bottlingDays),
         packagingEnd: endDate
-    });
+    };
+
+    if (isEdit) {
+        // Actualizar en el tanque
+        let scheduleUpdated = false;
+        tanks.forEach(t => {
+            const idx = (t.schedule || []).findIndex(s => s.id === entryId);
+            if (idx !== -1) {
+                if (t.name === tankName) {
+                    t.schedule[idx] = scheduleEntry;
+                } else {
+                    // Mover de tanque
+                    t.schedule.splice(idx, 1);
+                    tank.schedule = tank.schedule || [];
+                    tank.schedule.push(scheduleEntry);
+                }
+                scheduleUpdated = true;
+            }
+        });
+        
+        // Si el lote no estaba en el tanque por alguna razón, agregarlo
+        if (!scheduleUpdated) {
+            tank.schedule = tank.schedule || [];
+            tank.schedule.push(scheduleEntry);
+        }
+
+        // Actualizar en el historial
+        const histIdx = productionHistory.findIndex(h => h.id === entryId);
+        if (histIdx !== -1) {
+            productionHistory[histIdx] = {
+                id: entryId,
+                productId: prodId,
+                qtyLiters: liters,
+                qtyUnits: qtyUnits,
+                startDate: startDate,
+                endDate: endDate,
+                week: weekVal,
+                tankName: tank.name,
+                fermentationDays: fermentationDays,
+                fixedOrders: fixedOrders,
+                overflowBottles: overflowBottles,
+                isActive: true
+            };
+        }
+        
+        showNotification('Registro de producción y lote activo actualizados.', 'success');
+    } else {
+        // Agregar al tanque
+        tank.schedule = tank.schedule || [];
+        tank.schedule.push(scheduleEntry);
+
+        // Agregar al historial de producción semanal (como activo)
+        productionHistory.unshift({
+            id: entryId,
+            productId: prodId,
+            qtyLiters: liters,
+            qtyUnits: qtyUnits,
+            startDate: startDate,
+            endDate: endDate,
+            week: weekVal,
+            tankName: tank.name,
+            fermentationDays: fermentationDays,
+            fixedOrders: fixedOrders,
+            overflowBottles: overflowBottles,
+            isActive: true
+        });
+
+        showNotification('Producción activa iniciada. Tanque ocupado, materia prima descontada y registro guardado.', 'success');
+    }
 
     saveData();
     refreshAppUI();
     resetWeeklyProductionForm();
-    showNotification('Producción activa iniciada. Tanque ocupado y materia prima descontada.', 'success');
 }
 
 function updateWizardTankSelect() {
@@ -3137,15 +3279,12 @@ function wizardStartProduction() {
         return showNotification('Stock insuficiente de materia prima. Revisa la Verificación MRP.', 'error');
     }
 
-    // Descontar inventario
+    // Descontar inventario (usar litros directamente en lugar de botellas)
     const recipe = recipes.find(r => r.productId === prodId);
-    const product = inventory.find(p => p.id === prodId);
-    const totalUnits = product && product.volumePerUnit ? (qty / product.volumePerUnit) : qty;
-
     recipe.ingredients.forEach(ing => {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
         if (raw) {
-            raw.quantity -= (ing.qtyPerUnit * totalUnits);
+            raw.quantity -= (ing.qtyPerUnit * qty);
         }
     });
 
@@ -3157,23 +3296,57 @@ function wizardStartProduction() {
     const endDate = new Date(today);
     endDate.setDate(today.getDate() + fermentationDays + bottlingDays + packagingDays);
     
+    const entryId = Date.now();
+    const todayStr = getLocalDateStr(today);
+    const endStr = getLocalDateStr(endDate);
+    
     tank.schedule = tank.schedule || [];
     tank.schedule.push({
-        start: getLocalDateStr(today),
-        end: getLocalDateStr(endDate),
+        id: entryId,
+        start: todayStr,
+        end: endStr,
         productId: prodId,
         qty: qty,
         fermentationDays,
         bottlingDays,
         packagingDays,
-        fermentationEnd: addDays(getLocalDateStr(today), fermentationDays),
-        bottlingEnd: addDays(addDays(getLocalDateStr(today), fermentationDays), bottlingDays),
-        packagingEnd: getLocalDateStr(endDate)
+        fermentationEnd: addDays(todayStr, fermentationDays),
+        bottlingEnd: addDays(addDays(todayStr, fermentationDays), bottlingDays),
+        packagingEnd: endStr
+    });
+
+    // Calcular unidades aproximadas de botellas
+    const product = inventory.find(p => p.id === prodId);
+    const unitVolume = product?.volumePerUnit || 0.33;
+    const qtyUnits = Math.round(qty / unitVolume);
+
+    // Calcular en qué semana cae (1 a 4) en base a la fecha
+    const getWeekIndexFromDateLocal = (dateStr) => {
+        const date = new Date(`${dateStr}T00:00:00`);
+        if (isNaN(date)) return 0;
+        const diffDays = Math.floor((date - new Date()) / (1000 * 60 * 60 * 24));
+        return Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+    };
+    const weekVal = getWeekIndexFromDateLocal(todayStr) + 1;
+
+    // Agregar al historial de producción semanal (como activo)
+    productionHistory.unshift({
+        id: entryId,
+        productId: prodId,
+        qtyLiters: qty,
+        qtyUnits: qtyUnits,
+        startDate: todayStr,
+        endDate: endStr,
+        week: weekVal,
+        tankName: tank.name,
+        fermentationDays: fermentationDays,
+        fixedOrders: 0,
+        overflowBottles: 0,
+        isActive: true
     });
 
     saveData();
-    loadInventory(); // actualiza MP
-    showNotification('Producción iniciada. Tanque ocupado y materia prima descontada.', 'success');
+    refreshAppUI();
     
     // Reset Form and Switch Tab
     document.getElementById('wizard-product').value = '';
@@ -3194,36 +3367,56 @@ function renderTrackingActive() {
     let activeFound = false;
 
     tanks.forEach(tank => {
-        const activeIdx = (tank.schedule || []).findIndex(s => s.start <= todayStr);
-        if (activeIdx !== -1) {
+        (tank.schedule || []).forEach((schedule, scheduleIdx) => {
             activeFound = true;
-            const schedule = tank.schedule[activeIdx];
             const prod = inventory.find(p => p.id === schedule.productId);
             
-            // Calcular progreso
-            const startDate = new Date(`${schedule.start}T00:00:00`);
-            const endDate = new Date(`${schedule.end}T00:00:00`);
-            const today = new Date();
-            const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
-            const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
-            const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
-
+            // Check status
+            const isFuture = schedule.start > todayStr;
             const isOverdue = todayStr > schedule.end;
-            const statusBadge = isOverdue 
-                ? '<span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded border border-green-300 flex items-center gap-1"><i class="fas fa-check-circle"></i> Listo para Finalizar</span>'
-                : `<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded border border-amber-300 flex items-center gap-1"><i class="fas fa-spinner fa-spin"></i> En Proceso (${progress.toFixed(0)}%)</span>`;
+            
+            let statusBadge = '';
+            let cardBg = '';
+            let progress = 0;
+            let elapsedDays = 0;
+            let totalDays = 0;
+            
+            if (isFuture) {
+                const daysToStart = diffDays(todayStr, schedule.start);
+                statusBadge = `<span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded border border-blue-300 flex items-center gap-1"><i class="fas fa-calendar-alt"></i> Programado (Inicia en ${daysToStart}d)</span>`;
+                cardBg = 'bg-blue-50/50 border-blue-200';
+            } else {
+                const startDate = new Date(`${schedule.start}T00:00:00`);
+                const endDate = new Date(`${schedule.end}T00:00:00`);
+                const today = new Date();
+                totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
+                elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
+                progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
+
+                if (isOverdue) {
+                    statusBadge = '<span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded border border-green-300 flex items-center gap-1"><i class="fas fa-check-circle"></i> Listo para Finalizar</span>';
+                    cardBg = 'bg-green-50/50 border-green-200';
+                } else {
+                    statusBadge = `<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded border border-amber-300 flex items-center gap-1"><i class="fas fa-spinner fa-spin"></i> En Proceso (${progress.toFixed(0)}%)</span>`;
+                    cardBg = 'bg-amber-50 border-amber-200';
+                }
+            }
 
             const div = document.createElement('div');
-            div.className = `p-4 border rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${isOverdue ? 'bg-green-50/50 border-green-200' : 'bg-amber-50 border-amber-200'}`;
-            div.innerHTML = `
+            div.className = `p-4 border rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${cardBg}`;
+            
+            let leftCol = `
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
-                        <h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-flask mr-2 ${isOverdue ? 'text-green-600' : 'text-amber-500'}"></i> ${tank.name}</h3>
+                        <h3 class="font-bold text-gray-800 text-lg"><i class="fas fa-flask mr-2 ${isFuture ? 'text-blue-500' : isOverdue ? 'text-green-600' : 'text-amber-500'}"></i> ${tank.name}</h3>
                         ${statusBadge}
                     </div>
                     <p class="text-sm font-semibold text-gray-700">Producto: <span class="text-black">${prod ? prod.name : 'Desc.'}</span> (${schedule.qty} L)</p>
                     <p class="text-xs text-gray-600">Desde: ${schedule.start} | Estimado Fin: ${schedule.end}</p>
-                    
+            `;
+            
+            if (!isFuture) {
+                leftCol += `
                     <div class="mt-2 text-xs font-bold text-gray-700 flex justify-between">
                         <span>Progreso (${elapsedDays} de ${totalDays} días)</span>
                         <span>${progress.toFixed(0)}%</span>
@@ -3231,14 +3424,20 @@ function renderTrackingActive() {
                     <div class="w-full bg-gray-200 rounded-full h-2 mt-1 overflow-hidden">
                       <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-2 rounded-full" style="width: ${progress}%"></div>
                     </div>
-                </div>
+                `;
+            }
+            leftCol += `</div>`;
+            
+            let rightCol = `
                 <div class="flex-shrink-0">
-                    <button onclick="finishProduction(${tank.id}, ${activeIdx})" class="px-4 py-2 bg-green-600 text-white font-bold rounded hover:bg-green-700 transition-colors shadow-md w-full md:w-auto"><i class="fas fa-flag-checkered mr-2"></i> Finalizar Ciclo</button>
-                    <button onclick="deleteActiveProduction(${tank.id}, ${activeIdx})" class="px-4 py-2 mt-2 bg-red-100 text-red-600 font-bold rounded hover:bg-red-200 transition-colors shadow-sm text-xs w-full"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>
+                    <button onclick="finishProduction(${tank.id}, ${scheduleIdx})" ${isFuture ? 'disabled' : ''} class="px-4 py-2 bg-green-600 text-white font-bold rounded hover:bg-green-700 transition-colors shadow-md w-full md:w-auto ${isFuture ? 'opacity-50 cursor-not-allowed' : ''}"><i class="fas fa-flag-checkered mr-2"></i> Finalizar Ciclo</button>
+                    <button onclick="deleteActiveProduction(${tank.id}, ${scheduleIdx})" class="px-4 py-2 mt-2 bg-red-100 text-red-600 font-bold rounded hover:bg-red-200 transition-colors shadow-sm text-xs w-full"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>
                 </div>
             `;
+            
+            div.innerHTML = leftCol + rightCol;
             container.appendChild(div);
-        }
+        });
     });
 
     if (!activeFound) {
@@ -3275,34 +3474,47 @@ function finishProduction(tankId, scheduleIdx) {
         manufactureDate: getLocalDateStr()
     });
     
-    // Añadir al historial
-    productionHistory.unshift({
-        id: Date.now(),
-        productId: schedule.productId,
-        qtyLiters: schedule.qty,
-        qtyUnits: qtyToAdd,
-        startDate: schedule.start,
-        endDate: getLocalDateStr(),
-        tankName: tank.name
-    });
+    // Actualizar el historial existente en lugar de duplicar
+    const existingEntry = productionHistory.find(hist => hist.id === schedule.id);
+    if (existingEntry) {
+        existingEntry.isActive = false;
+        existingEntry.endDate = getLocalDateStr();
+        existingEntry.qtyUnits = qtyToAdd;
+    } else {
+        // Fallback si no tiene ID
+        productionHistory.unshift({
+            id: schedule.id || Date.now(),
+            productId: schedule.productId,
+            qtyLiters: schedule.qty,
+            qtyUnits: qtyToAdd,
+            startDate: schedule.start,
+            endDate: getLocalDateStr(),
+            tankName: tank.name,
+            isActive: false
+        });
+    }
     
     // Quitar del tanque
     tank.schedule.splice(scheduleIdx, 1);
     
     saveData();
-    renderTrackingActive();
-    renderTrackingHistory();
-    loadTanks(); // Refresh visual tanks if active
+    refreshAppUI();
     showNotification('Producción finalizada. Tanque liberado e inventario actualizado.', 'success');
 }
 
 function deleteActiveProduction(tankId, scheduleIdx) {
     if (!confirm('ATENCIÓN: ¿Deseas CANCELAR esta producción? Se vaciará el tanque pero NO se recuperará la materia prima.')) return;
     const tank = tanks.find(t => t.id === tankId);
+    const schedule = tank.schedule[scheduleIdx];
+    
+    // Eliminar también del historial
+    if (schedule.id) {
+        productionHistory = productionHistory.filter(hist => hist.id !== schedule.id);
+    }
+    
     tank.schedule.splice(scheduleIdx, 1);
     saveData();
-    renderTrackingActive();
-    loadTanks();
+    refreshAppUI();
     showNotification('Producción cancelada y tanque liberado.', 'info');
 }
 
