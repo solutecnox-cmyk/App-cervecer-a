@@ -152,6 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateWizardTankSelect();
     renderTrackingActive();
     renderTrackingHistory();
+    renderNotificationBell();
     showSection('produccion');
     switchProductionTab('semanal');
 });
@@ -2117,6 +2118,39 @@ function renderNotificationBell() {
     } else {
         badge.classList.add('hidden');
     }
+}
+
+function openNotificationsModal() {
+    const modal = document.getElementById('notifications-modal');
+    const list = document.getElementById('notifications-list');
+    if (!modal || !list) return;
+
+    const alerts = getAlerts();
+    if (alerts.length === 0) {
+        list.innerHTML = '<p class="text-gray-500 italic text-center py-6">No hay alertas pendientes.</p>';
+    } else {
+        list.innerHTML = alerts.map(alert => {
+            const iconClass = alert.type === 'Materia Prima'
+                ? 'fa-boxes text-amber-600'
+                : 'fa-industry text-blue-600';
+            return `
+                <div class="p-3 border border-gray-200 rounded-lg bg-gray-50">
+                    <p class="text-xs font-bold text-gray-500 uppercase mb-1">
+                        <i class="fas ${iconClass} mr-1"></i> ${alert.type}
+                    </p>
+                    <p class="text-sm text-gray-800">${alert.message}</p>
+                </div>
+            `;
+        }).join('');
+    }
+
+    modal.classList.remove('hidden');
+    renderNotificationBell();
+}
+
+function closeNotificationsModal() {
+    const modal = document.getElementById('notifications-modal');
+    if (modal) modal.classList.add('hidden');
 }
 
 // --- Tank Info Modal ---
