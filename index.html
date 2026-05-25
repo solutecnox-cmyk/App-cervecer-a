@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Gestión - Cervecería</title>
     <link rel="icon" href="logo.png" type="image/png">
-    <link rel="stylesheet" href="assets/tailwind.css">
+    <link rel="stylesheet" href="./assets/tailwind.css" id="tailwind-css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -841,6 +841,20 @@
     <!-- Print Area for PDFs -->
     <div id="print-area" class="hidden bg-white text-black p-8"></div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var probe = document.createElement('div');
+            probe.className = 'hidden';
+            document.body.appendChild(probe);
+            var tailwindOk = window.getComputedStyle(probe).display === 'none';
+            probe.remove();
+            if (!tailwindOk) {
+                var s = document.createElement('script');
+                s.src = 'https://cdn.tailwindcss.com/3.4.16';
+                document.head.appendChild(s);
+            }
+        });
+    </script>
     <script src="funciones.js"></script>
 </body>
 </html>
