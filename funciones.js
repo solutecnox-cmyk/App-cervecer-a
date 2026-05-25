@@ -1397,7 +1397,6 @@ function runProductionFlow() {
     const initialInvLiters = finalProducts.reduce(
         (sum, p) => sum + (p.quantity * getProductVolumePerUnit(p)), 0
     );
-    const initialInvBottles = litersToBottles(initialInvLiters);
     const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
 
     const weeklyInventoryInitial = [0, 0, 0, 0];
@@ -1611,7 +1610,6 @@ function runProductionFlow() {
     const volumeTable = document.getElementById('production-volume-table');
     const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
     const demandTable = document.getElementById('production-demand-table');
-    const inventoryTable = document.getElementById('production-inventory-table');
 
     // 4. Renderizar Tabla de Volúmenes sin la fila de Capacidad Disponible
     if (volumeTable || weeklyVolumeTable) {
@@ -1721,84 +1719,6 @@ function runProductionFlow() {
                         ${weeklyBarrilDemand.map((_, i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(totalDemand)}</td>
                         <td class="p-2 border text-center font-semibold">100%</td>
-                    </tr>
-                </tbody>
-            </table>
-        `;
-    }
-
-    if (inventoryTable) {
-        const startLiters = initialInvLiters;
-
-        inventoryTable.innerHTML = `
-            <table class="w-full text-left border-collapse border border-gray-200 text-sm">
-                <thead class="bg-[#1a1a2e] text-white">
-                    <tr>
-                        <th class="p-2 border">Concepto</th>
-                        <th class="p-2 border text-center bg-gray-600">Inicial (S0)</th>
-                        ${[0, 1, 2, 3].map(w => `<th class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : ''}">Semana ${w + 1}${weeklyDeficit[w] ? ' ⚠️' : ''}</th>`).join('')}
-                        <th class="p-2 border text-center bg-[#005B3A]">Total / Final</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr class="bg-blue-50">
-                        <td class="p-2 border font-semibold text-[13px]">📦 Inventario Inicial (L / Bot)</td>
-                        <td class="p-2 border text-center font-bold text-blue-700">${formatDecimal(startLiters)} L<br><span class="text-xs">${initialInvBottles} bot</span></td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-blue-600 font-semibold">${formatDecimal(weeklyInventoryInitial[w])} L<br><span class="text-xs">${litersToBottles(weeklyInventoryInitial[w])} bot</span></td>`).join('')}
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2 border font-semibold text-[13px]">🔵 + Pedidos Fijos (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyBarrilDemand.reduce((a, b) => a + b, 0))} L</td>
-                    </tr>
-                    <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">🟠 + Overflow (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyOverflowLiters.reduce((a, b) => a + b, 0))} L</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2 border font-semibold text-[13px]">🟢 + Pronóstico (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => {
-                            if (weeklyForecastCoversDemand[w]) {
-                                return `<td class="p-2 border text-center text-blue-600 font-semibold">Inv. cubre demanda</td>`;
-                            }
-                            return `<td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'text-blue-500' : 'text-amber-600 font-semibold'}">${formatDecimal(weeklyForecastProduction[w])} L</td>`;
-                        }).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastProduction.reduce((a, b) => a + b, 0))} L</td>
-                    </tr>
-                    <tr class="bg-[#1a1a2e] text-white">
-                        <td class="p-2 border font-bold text-[13px]">⚡ = Producción Total (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">${formatDecimal(weeklyTotalProduction[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(weeklyTotalProduction.reduce((a, b) => a + b, 0))} L</td>
-                    </tr>
-                    <tr class="bg-red-50">
-                        <td class="p-2 border font-semibold text-[13px] text-red-800">🔴 − Demanda Total (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-red-700 font-semibold ${weeklyDeficit[w] ? 'bg-red-100 font-bold' : ''}">${formatDecimal(weeklyDemandTotal[w])} L${weeklyDeficit[w] ? ' ⚠️' : ''}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold text-red-700">${formatDecimal(weeklyDemandTotal.reduce((a, b) => a + b, 0))} L</td>
-                    </tr>
-                    <tr class="bg-green-50">
-                        <td class="p-2 border font-bold text-[13px] text-green-800">📊 = Inventario Final (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold ${weeklyInventoryFinal[w] < 0 ? 'bg-red-100 text-red-700' : 'text-green-700'}">${formatDecimal(weeklyInventoryFinal[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold text-green-700">${formatDecimal(weeklyInventoryFinal[3])} L</td>
-                    </tr>
-                    <tr class="bg-emerald-50">
-                        <td class="p-2 border font-bold text-[13px] text-emerald-800">🍾 Inventario Final (Botellas)</td>
-                        <td class="p-2 border text-center font-bold text-emerald-700">${litersToBottles(startLiters)} bot</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold text-emerald-700">${litersToBottles(weeklyInventoryFinal[w])} bot</td>`).join('')}
-                        <td class="p-2 border text-center font-bold text-emerald-700">${litersToBottles(weeklyInventoryFinal[3])} bot</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2 border font-semibold text-[13px] text-gray-600">⚖️ Balance Semanal (L)</td>
-                        <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyBalance[w] >= 0 ? 'text-green-600' : 'text-red-600'}">${weeklyBalance[w] >= 0 ? '+' : ''}${formatDecimal(weeklyBalance[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center text-gray-400">—</td>
                     </tr>
                 </tbody>
             </table>
