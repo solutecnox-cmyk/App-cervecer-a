@@ -1364,31 +1364,41 @@ function runProductionFlow() {
     let weeklyOverflowBottles = [0, 0, 0, 0];
     let weeklyOverflowLiters = [0, 0, 0, 0];
 
-    // Cargar valores manuales o ajustes directos
-    for (let w = 0; w < 4; w++) {
-        weeklyBarrilDemand[w] = customWeeklyBarrilDemand[w] || 0;
-        weeklyForecastLiters[w] = customWeeklyForecastLiters[w] || 0;
-        weeklyOverflowBottles[w] = customWeeklyOverflowBottles[w] || 0;
-        weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w] || 0;
-    }
-
     finalProducts.forEach(p => {
         demandBarril[p.id] = [0, 0, 0, 0];
         demandBotellas[p.id] = [0, 0, 0, 0];
     });
 
-    // Agregar pedidos reales por producto
+    // Helper para determinar la semana del registro histórico (definida antes de usarla)
+    const getWeekIndexForHistoryEntry = (hist) => {
+        if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
+            return hist.week - 1;
+        }
+        return getWeekIndexFromDate(hist.startDate || hist.endDate);
+    };
+
+    // Pedidos fijos y overflow se leen EXCLUSIVAMENTE del historial de producción semanal
+    productionHistory.forEach(hist => {
+        const wIdx = getWeekIndexForHistoryEntry(hist);
+        if (wIdx >= 0 && wIdx <= 3) {
+            weeklyBarrilDemand[wIdx] += hist.fixedOrders || 0;
+            weeklyOverflowBottles[wIdx] += hist.overflowBottles || 0;
+            const volumePerUnit = inventory.find(p => p.id === hist.productId)?.volumePerUnit || 0.33;
+            weeklyOverflowLiters[wIdx] += (hist.overflowBottles || 0) * volumePerUnit;
+        }
+    });
+
+    // Agregar pedidos reales por producto (canal barril - órdenes de venta)
     orders.forEach(o => {
         const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBarril[o.productId]) {
             const volume = o.qty * (inventory.find(p=>p.id===o.productId)?.volumePerUnit || 1);
             demandBarril[o.productId][w] += volume;
-            weeklyBarrilDemand[w] += volume;
         }
     });
 
-    // Agregar pronósticos reales
+    // Agregar pronósticos reales (canal botellas)
     forecasts.forEach(f => {
         const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
@@ -1400,24 +1410,7 @@ function runProductionFlow() {
         }
     });
 
-    // Agregar Pedidos Fijos y Overflow del historial (productionHistory)
-    productionHistory.forEach(hist => {
-        const wIdx = getWeekIndexForHistoryEntry(hist);
-        if (wIdx >= 0 && wIdx <= 3) {
-            weeklyBarrilDemand[wIdx] += hist.fixedOrders || 0;
-            weeklyOverflowBottles[wIdx] += hist.overflowBottles || 0;
-            const volumePerUnit = inventory.find(p => p.id === hist.productId)?.volumePerUnit || 0.33;
-            weeklyOverflowLiters[wIdx] += (hist.overflowBottles || 0) * volumePerUnit;
-        }
-    });
-
-    // Helper para determinar la semana del registro histórico
-    const getWeekIndexForHistoryEntry = (hist) => {
-        if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
-            return hist.week - 1;
-        }
-        return getWeekIndexFromDate(hist.startDate || hist.endDate);
-    };
+    // (helper ya definido arriba)
 
     // 2. Calcular MPS (Plan Maestro de Producción)
     let totalLiters = 0;
@@ -1676,33 +1669,30 @@ function runProductionFlow() {
                 </thead>
                 <tbody>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
+                        <td class="p-2 border font-semibold">Pedidos fijos — Barril (L) <span class="text-[10px] text-gray-400 font-normal">(desde Prod. Semanal)</span></td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('barril', ${w})">
-                                <span class="font-semibold text-gray-800">${weeklyBarrilDemand[w]} L</span>
-                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            <td class="p-2 border text-center font-medium">
+                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyBarrilDemand[w])} L</span>
                             </td>
                         `).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Overflow embotellado barril (bot)</td>
+                        <td class="p-2 border font-semibold">Overflow embotellado barril (bot) <span class="text-[10px] text-gray-400 font-normal">(desde Prod. Semanal)</span></td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('overflow_bottles', ${w})">
-                                <span class="font-semibold text-gray-800">${weeklyOverflowBottles[w]} Bot</span>
-                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            <td class="p-2 border text-center font-medium">
+                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyOverflowBottles[w])} Bot</span>
                             </td>
                         `).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)} Bot</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Producción según pronósticos (L)</td>
+                        <td class="p-2 border font-semibold">Producción según pronósticos (L) <span class="text-[10px] text-gray-400 font-normal">(desde Pronósticos)</span></td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar" onclick="editWeeklyVolumeTableValue('forecast', ${w})">
-                                <span class="font-semibold text-gray-800">${weeklyForecastLiters[w]} L</span>
-                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                            <td class="p-2 border text-center font-medium">
+                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyForecastLiters[w])} L</span>
                             </td>
                         `).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)} L</td>
@@ -2798,8 +2788,7 @@ function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-fermentation-days').value = '8';
     document.getElementById('weekly-edit-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
-    document.getElementById('weekly-edit-fixed-orders').value = '0';
-    document.getElementById('weekly-edit-overflow-bottles').value = '0';
+
     const statusDiv = document.getElementById('weekly-mrp-status');
     if (statusDiv) {
         statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>';
@@ -2838,8 +2827,7 @@ function editWeeklyProductionEntry(entryId) {
     document.getElementById('weekly-edit-week').value = entry.week || '';
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
-    document.getElementById('weekly-edit-fixed-orders').value = entry.fixedOrders != null ? formatDecimal(entry.fixedOrders) : '0';
-    document.getElementById('weekly-edit-overflow-bottles').value = entry.overflowBottles != null ? formatDecimal(entry.overflowBottles) : '0';
+
 
     // Load tank select
     updateWeeklyEditTankSelect();
@@ -2972,8 +2960,8 @@ function startWeeklyProductionActive() {
     const dateInput = document.getElementById('weekly-edit-date').value;
     const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value) || 8;
     
-    const fixedOrders = parseFloat(document.getElementById('weekly-edit-fixed-orders').value) || 0;
-    const overflowBottles = parseInt(document.getElementById('weekly-edit-overflow-bottles').value, 10) || 0;
+    const fixedOrders = 0;
+    const overflowBottles = 0;
     
     const weekSelect = document.getElementById('weekly-edit-week').value;
     const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
