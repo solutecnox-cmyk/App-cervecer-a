@@ -301,7 +301,7 @@ function loadClients() {
     const tbody = document.getElementById('clients-table-body');
     tbody.innerHTML = '';
     if (clients.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay clientes registrados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay clientes registrados.NonNullNeon</td></tr>';
         return;
     }
     clients.forEach(client => {
@@ -1306,7 +1306,6 @@ function renderPlaneacionPlaceholder() {
     if (kpiContainer) kpiContainer.innerHTML = '';
     if (out) out.innerHTML = '';
 }
-
 // --- Production Flow: MPS -> MRP -> CRP ---
 function runProductionFlow() {
     const out = document.getElementById('production-output');
@@ -1651,10 +1650,31 @@ function runProductionFlow() {
     const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
     const demandTable = document.getElementById('production-demand-table');
 
-    // 4. Renderizar Tabla de Volúmenes
+    // APLICAR FÓRMULA PARA OVERFLOW EN SEMANAS 3 Y 4
+    // Fórmula: =SI(E52+F52<=720;0;SI((E52+F52-720)<480;480;720))
+    const adjustedOverflowLiters = [...weeklyOverflowLiters];
+    
+    for (let w = 2; w < 4; w++) { // Semanas 3 y 4 (índices 2 y 3)
+        const forecastValue = weeklyForecastLiters[w] || 0;
+        const overflowBarril = weeklyBarrilDemand[w] || 0;
+        const totalDemandaPronostico = forecastValue + overflowBarril;
+        
+        if (totalDemandaPronostico <= 720) {
+            adjustedOverflowLiters[w] = 0;
+        } else {
+            const excedente = totalDemandaPronostico - 720;
+            if (excedente < 480) {
+                adjustedOverflowLiters[w] = 480;
+            } else {
+                adjustedOverflowLiters[w] = 720;
+            }
+        }
+    }
+
+    // 4. Renderizar Tabla de Volúmenes (MODIFICADA - "Overflow (L)" en lugar de "Overflow Embotellado")
     if (volumeTable || weeklyVolumeTable) {
         const barrilTotal = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
-        const overflowTotalLiters = weeklyOverflowLiters.reduce((a, b) => a + b, 0);
+        const overflowTotalLiters = adjustedOverflowLiters.reduce((a, b) => a + b, 0);
         const forecastProdTotal = weeklyForecastProduction.reduce((a, b) => a + b, 0);
         const producedTotal = weeklyTotalProduction.reduce((a, b) => a + b, 0);
         const pctRow = (val) => Math.round((val / (producedTotal || 1)) * 100);
@@ -1687,8 +1707,8 @@ function runProductionFlow() {
                         <td class="p-2 border text-center font-semibold">${pctRow(barrilTotal)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">🟠 Overflow Embotellado (L)</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
+                        <td class="p-2 border font-semibold text-[13px]">🟠 Overflow (L)</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(adjustedOverflowLiters[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(overflowTotalLiters)} L</td>
                         <td class="p-2 border text-center font-semibold">${pctRow(overflowTotalLiters)}%</td>
                     </tr>
@@ -1876,7 +1896,7 @@ function runProductionFlow() {
             },
             weeklyProducedLiters,
             weeklyForecastProduction,
-            weeklyOverflowLiters
+            adjustedOverflowLiters
         };
         window.getProductionPlanningReport = () => JSON.stringify(window._lastProductionCalc, null, 2);
     } catch (e) { console.error('debug export failed', e); }
@@ -1996,7 +2016,7 @@ function editWeeklyVolumeTableValue(type, weekIndex) {
         label = "Pedidos fijos — Barril (L)";
     } else if (type === 'overflow_bottles') {
         currentVal = customWeeklyOverflowBottles[weekIndex];
-        label = "Overflow embotellado barril (bot)";
+        label = "Overflow (L)";
     } else if (type === 'forecast') {
         currentVal = customWeeklyForecastLiters[weekIndex];
         label = "Producción según pronósticos (L)";
@@ -2529,7 +2549,6 @@ function saveTankSchedule(event) {
     closeTankScheduleModal();
     showNotification(isEdit ? 'Lote actualizado correctamente.' : 'Tanque llenado manualmente.', 'success');
 }
-
 // --- NUEVA LÓGICA DE PRODUCCIÓN (TABS, WIZARD Y SEGUIMIENTO) ---
 
 function switchProductionTab(tabId) {
@@ -2843,7 +2862,7 @@ function renderWeeklyProductionTab() {
                 <td class="p-2 border"><button type="button" onclick="openWeeklyProductionHistoryEditor('${row.week}', ${row.productId})" class="text-[#005B3A] font-semibold text-sm hover:underline">Ver / Ajustar</button></td>
             </tr>`;
         });
-        html += '</tbody></table>';
+        html += '</tbody></tr>';
         productionContainer.innerHTML = html;
     }
 
@@ -3366,6 +3385,9 @@ function startWeeklyProductionActive() {
     const fixedOrders = fixedLiters;
     const forecastLitersValue = forecastLiters;
 
+    // Calcular overflow (litros sobrantes) - los litros que exceden la capacidad semanal
+    const overflowValue = Math.max(0, litersToFerment - DEFAULT_WEEKLY_CAPACITY_L);
+
     const weekSelect = document.getElementById('weekly-edit-week').value;
     const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
     const weekIndex = getWeeklyIndexFromForm();
@@ -3496,7 +3518,8 @@ function startWeeklyProductionActive() {
         tankName: tank.name,
         fermentationDays: fermentationDays,
         fixedOrders: fixedOrders,
-        overflowBottles: 0,
+        overflowBottles: Math.floor(overflowValue / unitVolume),  // Guardar overflow en botellas
+        overflowLiters: overflowValue,  // Guardar overflow en litros
         isActive: true
     };
 
@@ -3507,10 +3530,10 @@ function startWeeklyProductionActive() {
         } else {
             productionHistory.unshift(historyPayload);
         }
-        showNotification('Registro actualizado. Fijos: ' + formatDecimal(fixedOrders) + ' L · Pronóstico: ' + formatDecimal(forecastLitersValue) + ' L', 'success');
+        showNotification('Registro actualizado. Fijos: ' + formatDecimal(fixedOrders) + ' L · Pronóstico: ' + formatDecimal(forecastLitersValue) + ' L · Overflow: ' + formatDecimal(overflowValue) + ' L', 'success');
     } else {
         productionHistory.unshift(historyPayload);
-        showNotification(`Producción iniciada: ${formatDecimal(litersToFerment)} L a fermentar. Pedidos fijos: ${formatDecimal(fixedOrders)} L · Pronóstico: ${formatDecimal(forecastLitersValue)} L`, 'success');
+        showNotification(`Producción iniciada: ${formatDecimal(litersToFerment)} L a fermentar. Pedidos fijos: ${formatDecimal(fixedOrders)} L · Pronóstico: ${formatDecimal(forecastLitersValue)} L · Overflow: ${formatDecimal(overflowValue)} L`, 'success');
     }
 
     let previousFixed = 0;
@@ -3573,7 +3596,7 @@ function updateWizardTankSelect() {
 
     const todayStr = getLocalDateStr();
     tanks.forEach(t => {
-        const isOccupied = (t.schedule || []).some(s => s.start <= todayStr);
+        const isOccupied = (t.schedule || []).some(s => s.start <= todayStr && s.end >= todayStr);
         if (!isOccupied) {
             const opt = document.createElement('option');
             opt.value = t.id;
@@ -3676,12 +3699,14 @@ function wizardStartProduction() {
     }
 
     const recipe = recipes.find(r => r.productId === prodId);
-    recipe.ingredients.forEach(ing => {
-        const raw = inventory.find(p => p.id === ing.ingredientProductId);
-        if (raw) {
-            raw.quantity -= (ing.qtyPerUnit * qty);
-        }
-    });
+    if (recipe) {
+        recipe.ingredients.forEach(ing => {
+            const raw = inventory.find(p => p.id === ing.ingredientProductId);
+            if (raw) {
+                raw.quantity -= (ing.qtyPerUnit * qty);
+            }
+        });
+    }
 
     const today = new Date();
     const fermentationDays = 8;
@@ -3712,6 +3737,7 @@ function wizardStartProduction() {
     const product = inventory.find(p => p.id === prodId);
     const unitVolume = getProductVolumePerUnit(product);
     const qtyUnits = Math.round(qty / unitVolume);
+    const overflowValue = Math.max(0, qty - DEFAULT_WEEKLY_CAPACITY_L);
 
     const getWeekIndexFromDateLocal = (dateStr) => {
         const date = new Date(`${dateStr}T00:00:00`);
@@ -3732,7 +3758,8 @@ function wizardStartProduction() {
         tankName: tank.name,
         fermentationDays: fermentationDays,
         fixedOrders: 0,
-        overflowBottles: 0,
+        overflowBottles: Math.floor(overflowValue / unitVolume),
+        overflowLiters: overflowValue,
         isActive: true
     });
 
