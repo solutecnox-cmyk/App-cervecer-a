@@ -7,24 +7,27 @@ let inventory = savedState.inventory || JSON.parse(localStorage.getItem('invento
 let cart = [];
 let selectedProductId = null; // Para el buscador de productos en POS
 let suppliers = savedState.suppliers || JSON.parse(localStorage.getItem('suppliers')) || [];
-// Nuevas estructuras: bodegas y lotes (batches)
 
 function formatDecimal(value, digits = 8) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '0';
     return num.toFixed(digits).replace(/\.0+$/, '').replace(/(\.[0-9]*?)0+$/, '$1');
 }
+
 function getLocalDateStr(date = new Date()) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
 }
+
 let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
 let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
+
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
 let orders = savedState.orders || JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
 let forecasts = savedState.forecasts || JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
+
 let defaultRecipes = [
     {
         "productId": 201,
@@ -95,14 +98,15 @@ let defaultRecipes = [
         ]
     }
 ];
-let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || defaultRecipes; // {productId, ingredients: [{ingredientProductId, qtyPerUnit}]}
+
+let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || defaultRecipes;
 let editingRecipeProductId = null;
 let editingTankId = null;
-let editingNewProductId = null; // para modal emergente cuando se crea producto desde receta
-let editingProductId = null; // para editar productos existentes desde modales
-let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || []; // {id, name, capacityLiters, schedule: [{start, end, productId, qty}]}
-let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || []; // {id, ingredientId, qty, status}
-let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || []; // {id, productId, qty, startDate, endDate, tankName}
+let editingNewProductId = null;
+let editingProductId = null;
+let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || [];
+let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || [];
+let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || [];
 let weekCalculationMode = savedState.weekCalculationMode || 'month';
 let customWeeklyCapacities = savedState.customWeeklyCapacities || [720, 720, 720, 720];
 let customWeeklyBarrilDemand = savedState.customWeeklyBarrilDemand || [0, 0, 0, 0];
@@ -113,7 +117,6 @@ let customWeeklyOverflowLiters = savedState.customWeeklyOverflowLiters || [0, 0,
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Si la base de datos local está vacía, inicializar con datos de ejemplo
     if (inventory.length === 0) {
         seedSampleData();
     }
@@ -130,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTanks();
     updateOrderProductSelect();
     updateForecastProductSelect();
-    
+
     updateWizardProductSelect();
     updateWizardTankSelect();
     renderTrackingActive();
@@ -146,18 +149,13 @@ function confirmResetSampleData() {
     }
 }
 
-// --- Semilla de Datos de Ejemplo (Cervecería B&E) ---
 function seedSampleData() {
-    // 1. Proveedores
     suppliers = [
         { id: 1, type: 'empresa', nit: '900.000.001-1', name: 'Proveedor Bogotá', phone: '3001111111', email: 'bogota@proveedor.com' },
         { id: 2, type: 'empresa', nit: '900.000.002-2', name: 'Proveedor Armenia', phone: '3002222222', email: 'armenia@proveedor.com' }
     ];
 
-    // 2. Inventario (Materia Prima y Productos Finales)
-    // leadTime en días, purchaseUnit en unidades de compra
     inventory = [
-        // Materia Prima
         { id: 101, type: 'raw', sku: 'MP-001', name: 'Malta Pale Ale (kg)', price: 0, supplierId: 1, quantity: 54, safetyStock: 36.00, leadTime: 2, purchaseUnit: 25 },
         { id: 102, type: 'raw', sku: 'MP-002', name: 'Malta Pilsen (kg)', price: 0, supplierId: 1, quantity: 50, safetyStock: 30.67, leadTime: 2, purchaseUnit: 25 },
         { id: 103, type: 'raw', sku: 'MP-003', name: 'Malta Chocolate (kg)', price: 0, supplierId: 1, quantity: 30, safetyStock: 18.67, leadTime: 2, purchaseUnit: 25 },
@@ -168,7 +166,6 @@ function seedSampleData() {
         { id: 108, type: 'raw', sku: 'MP-008', name: 'Botellas 330 mL (und)', price: 0, supplierId: 2, quantity: 400, safetyStock: 242, leadTime: 1, purchaseUnit: 24 },
         { id: 109, type: 'raw', sku: 'MP-009', name: 'Tapas corona (und)', price: 0, supplierId: 2, quantity: 500, safetyStock: 242, leadTime: 1, purchaseUnit: 100 },
         { id: 110, type: 'raw', sku: 'MP-010', name: 'Agua (L)', price: 0, supplierId: 1, quantity: 10000, safetyStock: 1000, leadTime: 0, purchaseUnit: 1000 },
-        // Productos Finales (Inventario PT inicial = 50 botellas por sabor = 300 total)
         { id: 201, type: 'final', sku: 'PT-IPA-P', name: 'IPA Pijao', price: 10000, supplierId: null, quantity: 50, volumePerUnit: 0.33 },
         { id: 202, type: 'final', sku: 'PT-IPA-H', name: 'IPA Honey', price: 10000, supplierId: null, quantity: 50, volumePerUnit: 0.33 },
         { id: 203, type: 'final', sku: 'PT-HGA', name: 'Honey Golden Ale', price: 10000, supplierId: null, quantity: 50, volumePerUnit: 0.33 },
@@ -179,13 +176,11 @@ function seedSampleData() {
 
     recipes = JSON.parse(JSON.stringify(defaultRecipes));
 
-    // 4. Clientes (Gastrobares)
     clients = [
         { id: 1, numDoc: '900111', razonSocial: 'Bar Armenia', nombreComercial: 'Gastrobar AR', ciudad: 'Armenia', correo: 'contacto@bararmenia.com' },
         { id: 2, numDoc: '900222', razonSocial: 'Bar Manizales', nombreComercial: 'Gastrobar MZ', ciudad: 'Manizales', correo: 'contacto@barmanizales.com' }
     ];
 
-    // 5. Bodegas y Lotes (Batches)
     warehouses = [
         { id: 1, name: 'Bodega Principal', location: 'Planta Alta' },
         { id: 2, name: 'Bodega Frío', location: 'Sótano' }
@@ -195,7 +190,6 @@ function seedSampleData() {
         { id: 2, productId: 202, warehouseId: 2, lot: 'L-002', quantity: 30, manufactureDate: getLocalDateStr(), createdAt: new Date().toISOString() }
     ];
 
-    // 6. Producción (Órdenes, Pronósticos y Tanques)
     orders = [
         { id: 1, productId: 201, qty: 10, dueDate: getLocalDateStr(), createdAt: new Date().toISOString() }
     ];
@@ -204,31 +198,24 @@ function seedSampleData() {
     ];
     const hoy = new Date();
     const inicio = new Date(hoy);
-    inicio.setDate(inicio.getDate() - 2); // Empezó hace 2 días
+    inicio.setDate(inicio.getDate() - 2);
     const fin = new Date(hoy);
-    fin.setDate(fin.getDate() + 5); // Termina en 5 días
+    fin.setDate(fin.getDate() + 5);
 
     tanks = [
-        { 
-            id: 1, 
-            name: 'Tanque Fermentador 1', 
-            capacityLiters: 1000, 
-            schedule: [{
-                start: getLocalDateStr(inicio),
-                end: getLocalDateStr(fin),
-                productId: 201, // IPA Pijao
-                qty: 800
-            }] 
+        {
+            id: 1,
+            name: 'Tanque Fermentador 1',
+            capacityLiters: 1000,
+            schedule: []
         },
         { id: 2, name: 'Tanque Maduración 1', capacityLiters: 1000, schedule: [] }
     ];
 
-    // Guardar en LocalStorage
     saveData();
     showNotification('Datos iniciales del modelo de Cervecería B&E cargados correctamente.', 'success');
 }
 
-// --- Navegación de Secciones ---
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
@@ -287,7 +274,7 @@ function loadClients() {
         row.querySelector('button').onclick = () => deleteClient(client.id);
     });
 }
-        
+
 function deleteClient(id) {
     if (confirm('¿Estás seguro de que quieres eliminar este cliente?')) {
         clients = clients.filter(c => c.id !== id);
@@ -404,6 +391,7 @@ function openAddProductModal(type = 'final', productId = null) {
     handleProductTypeChange();
     document.getElementById('product-modal').classList.remove('hidden');
 }
+
 function closeProductModal() {
     document.getElementById('product-modal').classList.add('hidden');
     editingProductId = null;
@@ -415,7 +403,6 @@ function handleProductTypeChange() {
     const productVolumeDiv = document.getElementById('product-volume-div');
     const supplierDiv = document.getElementById('product-supplier-div');
     const safetyDiv = document.getElementById('product-safety-stock-div');
-    const priceLabel = document.getElementById('product-price-label');
 
     const priceInput = document.getElementById('product-price');
     const volumeInput = document.getElementById('product-volume');
@@ -483,7 +470,6 @@ function saveProduct(event) {
     closeProductModal();
 }
 
-// --- Modal para producto creado automáticamente desde Receta ---
 function openProductCreatedModal(id) {
     const prod = inventory.find(p => p.id === id);
     if (!prod) return;
@@ -522,7 +508,6 @@ function saveCreatedProductFromModal(event) {
     const prod = inventory.find(p => p.id === editingNewProductId);
     if (!prod) return;
     prod.sku = document.getElementById('product-created-sku').value || prod.sku;
-    // name no editable en modal (se asume viene de la receta)
     prod.price = parseFloat(document.getElementById('product-created-price').value) || 0;
     prod.volumePerUnit = parseFloat(document.getElementById('product-created-volume').value) || prod.volumePerUnit || 0.33;
     prod.unitType = document.getElementById('product-created-unit').value || prod.unitType;
@@ -539,11 +524,11 @@ function saveCreatedProductFromModal(event) {
 function loadInventory() {
     const tbodyFinal = document.getElementById('inventory-final-table-body');
     const tbodyRaw = document.getElementById('inventory-raw-table-body');
-    
+
     if (tbodyFinal && tbodyRaw) {
         tbodyFinal.innerHTML = '';
         tbodyRaw.innerHTML = '';
-        
+
         const finalProducts = inventory.filter(p => p.type !== 'raw');
         const rawMaterials = inventory.filter(p => p.type === 'raw');
 
@@ -591,7 +576,7 @@ function loadInventory() {
             });
         }
     }
-    loadMRP(); // Actualizar barras de MRP cuando cambie el inventario
+    loadMRP();
     renderNotificationBell();
 }
 
@@ -606,12 +591,12 @@ function deleteProduct(id) {
 
 function adjustStock(id) {
     const product = inventory.find(p => p.id === id);
-    if(!product) return;
-    
+    if (!product) return;
+
     const input = prompt(`Ajustar inventario de ${product.name}.\nCantidad actual: ${product.quantity}\nIngresa el valor a SUMAR o RESTAR (ej: 5 para sumar, -2 para restar):`, "0");
     if (input !== null && input.trim() !== "") {
         const qty = parseFloat(input);
-        if(!isNaN(qty)) {
+        if (!isNaN(qty)) {
             product.quantity += qty;
             if (product.quantity < 0) product.quantity = 0;
             saveData();
@@ -625,24 +610,24 @@ function adjustStock(id) {
 
 function quickRestock(productId, qty) {
     const product = inventory.find(p => p.id === productId);
-    if(product) {
+    if (product) {
         product.quantity += qty;
         saveData();
         loadInventory();
         showNotification(`Se reabastecieron ${qty} unidades de ${product.name}`, 'success');
-        runProductionFlow(); // Recalcular MRP
+        runProductionFlow();
     }
 }
 
 function generatePurchaseOrder(id) {
     const product = inventory.find(p => p.id === id);
     if (!product) return;
-    
+
     if (!product.supplierId) {
         showNotification('El producto no tiene un proveedor asignado.', 'error');
         return;
     }
-    
+
     const supplier = suppliers.find(s => s.id == product.supplierId);
     if (!supplier) {
         showNotification('Proveedor no encontrado.', 'error');
@@ -670,11 +655,11 @@ function generatePurchaseOrder(id) {
 
     if (qtyToOrder > 0) {
         if (confirm(`¿Deseas generar la orden de compra en PDF por ${qtyToOrder} unidades de ${product.name} a ${supplier.name}?`)) {
-            
+
             const printArea = document.getElementById('print-area');
             const today = new Date().toLocaleDateString();
             const orderId = 'OC-' + Date.now().toString().slice(-6);
-            
+
             printArea.innerHTML = `
                 <div class="max-w-4xl mx-auto border border-gray-300 p-8">
                     <div class="flex justify-between items-start mb-8">
@@ -724,7 +709,7 @@ function generatePurchaseOrder(id) {
                     </div>
                 </div>
             `;
-            
+
             purchaseOrders.push({
                 id: orderId,
                 ingredientId: product.id,
@@ -733,10 +718,10 @@ function generatePurchaseOrder(id) {
                 date: new Date().toISOString()
             });
             saveData();
-            
+
             printArea.classList.remove('hidden');
             window.print();
-            
+
             setTimeout(() => {
                 printArea.classList.add('hidden');
             }, 1000);
@@ -745,8 +730,6 @@ function generatePurchaseOrder(id) {
 }
 
 function loadMRP() {
-    // La vista MRP ahora se renderiza completamente dentro de runProductionFlow()
-    // en la pestaña de Producción, por lo que las barras simples ya no son necesarias.
     const container = document.getElementById('mrp-bars-container');
     if (container) {
         container.innerHTML = '<p class="text-gray-500 text-sm">Visita el Dashboard de Producción para ver el MRP detallado a 4 semanas.</p>';
@@ -779,17 +762,15 @@ function renderWarehousesVisual() {
     const container = document.getElementById('warehouses-visual-container');
     if (!container) return;
     container.innerHTML = '';
-    
+
     if (warehouses.length === 0) {
         container.innerHTML = '<p class="text-gray-500 text-sm">No hay bodegas registradas.</p>';
         return;
     }
 
     warehouses.forEach(w => {
-        // Encontrar los lotes de esta bodega
         const whBatches = batches.filter(b => b.warehouseId === w.id && b.quantity > 0);
-        
-        // Construir el tooltip HTML
+
         let tooltipHtml = `<div class="font-bold border-b mb-2 pb-1">${w.name} (${w.location})</div>`;
         if (whBatches.length === 0) {
             tooltipHtml += `<p class="text-gray-500 italic">Bodega vacía</p>`;
@@ -856,7 +837,6 @@ function createBatch({ productId, warehouseId, lot, qty, manufactureDate }) {
     };
     batches.push(batch);
 
-    // Actualizar cantidad global del producto en inventory
     const prod = inventory.find(p => p.id === productId);
     if (prod) {
         prod.quantity = (prod.quantity || 0) + qty;
@@ -867,7 +847,6 @@ function createBatch({ productId, warehouseId, lot, qty, manufactureDate }) {
 }
 
 function loadBatches() {
-    // Reutilizamos el renderizado visual de bodegas
     renderWarehousesVisual();
 }
 
@@ -898,7 +877,6 @@ function updateOrderProductSelect() {
 }
 
 function updateForecastProductSelect() {
-    // usa el mismo select por ahora
     updateOrderProductSelect();
 }
 
@@ -926,7 +904,6 @@ function addForecastFromUI() {
 }
 
 function loadOrders() {
-    // Para simplicidad mostramos cantidad de pedidos en el panel de producción
     const el = document.getElementById('production-result');
     if (!el) return;
     el.textContent = `Pedidos: ${orders.length} · Pronósticos: ${forecasts.length}`;
@@ -943,7 +920,6 @@ function openRecipeModal(recipeProductId = null) {
     document.getElementById('recipe-ingredients-container').innerHTML = '';
     document.getElementById('recipe-modal-title').textContent = 'Definir Receta (BOM)';
 
-    // Poblar datalist de producto final (permite escribir un nombre nuevo o elegir existente)
     const input = document.getElementById('recipe-product-input');
     const datalist = document.getElementById('recipe-product-list');
     datalist.innerHTML = '';
@@ -972,7 +948,7 @@ function openRecipeModal(recipeProductId = null) {
         document.getElementById('recipe-modal-title').textContent = 'Editar Receta';
     } else {
         input.value = '';
-        addIngredientRow(); // Añadir una fila por defecto
+        addIngredientRow();
     }
 
     closeRecipeListModal();
@@ -1053,7 +1029,7 @@ function addIngredientRow() {
     const container = document.getElementById('recipe-ingredients-container');
     const row = document.createElement('div');
     row.className = 'flex gap-2 items-center mb-2 ingredient-row';
-    
+
     let options = '<option value="">-- Ingrediente (Materia Prima) --</option>';
     const rawMaterials = inventory.filter(p => p.type === 'raw');
     rawMaterials.forEach(p => {
@@ -1075,13 +1051,11 @@ function saveRecipe(event) {
     const productName = document.getElementById('recipe-product-input').value.trim();
     if (!productName) return showNotification('Ingresa o selecciona un producto final.', 'error');
 
-    // Buscar producto existente por nombre (case-insensitive)
     let prod = inventory.find(p => p.name.toLowerCase() === productName.toLowerCase());
     let productId;
     if (prod) {
         productId = prod.id;
     } else {
-        // Crear nuevo producto final mínimo si no existe
         const newProd = {
             id: Date.now(),
             type: 'final',
@@ -1102,7 +1076,6 @@ function saveRecipe(event) {
         updateForecastProductSelect();
         prod = newProd;
         productId = newProd.id;
-        // Abrir modal emergente para revisar/editar el producto recién creado
         editingNewProductId = newProd.id;
         setTimeout(() => openProductCreatedModal(newProd.id), 120);
     }
@@ -1131,7 +1104,6 @@ function saveRecipe(event) {
 }
 
 function loadRecipes() {
-
     if (document.getElementById('recipe-list-modal') && !document.getElementById('recipe-list-modal').classList.contains('hidden')) {
         renderRecipeList();
     }
@@ -1164,7 +1136,7 @@ function saveTank(event) {
     event.preventDefault();
     const name = document.getElementById('tank-name').value.trim();
     const cap = parseFloat(document.getElementById('tank-capacity').value);
-    
+
     if (!name || isNaN(cap) || cap <= 0) {
         return showNotification('Ingresa un nombre y capacidad válidos.', 'error');
     }
@@ -1207,7 +1179,6 @@ function loadTanks() {
         let statusBgColor = 'bg-[#005B3A]';
         let statusText = 'Libre';
 
-        // Check active schedule (started and not yet finalized)
         let activeSchedule = (tank.schedule || []).find(s => {
             return s.start <= todayStr;
         });
@@ -1223,13 +1194,12 @@ function loadTanks() {
                 statusText = `Fermentando:<br>${prod ? prod.name : 'Prod.'}`;
             }
         } else {
-            // Check if there is a future schedule
             const futureSchedule = (tank.schedule || []).find(s => s.start > todayStr);
             if (futureSchedule) {
                 const prod = inventory.find(p => p.id === futureSchedule.productId);
                 statusBgColor = 'bg-blue-500';
                 statusText = `Reservado:<br>${prod ? prod.name : 'Prod.'}`;
-                activeSchedule = futureSchedule; // To show the tooltip info
+                activeSchedule = futureSchedule;
             }
         }
 
@@ -1237,18 +1207,13 @@ function loadTanks() {
         div.className = 'relative flex flex-col items-center group cursor-pointer';
         div.innerHTML = `
             <svg viewBox="0 0 100 150" class="w-24 h-36 drop-shadow-md">
-                <!-- Legs -->
                 <rect x="25" y="110" width="4" height="30" fill="#9ca3af"/>
                 <rect x="71" y="110" width="4" height="30" fill="#9ca3af"/>
                 <line x1="25" y1="130" x2="75" y2="130" stroke="#9ca3af" stroke-width="2"/>
-                <!-- Main Body -->
                 <path d="M15,20 L85,20 L85,90 L55,120 L45,120 L15,90 Z" fill="#e5e7eb" stroke="#6b7280" stroke-width="2"/>
-                <!-- Top Dome -->
                 <path d="M15,20 Q50,-5 85,20 Z" fill="#d1d5db" stroke="#6b7280" stroke-width="2"/>
-                <!-- Bottom Pipe -->
                 <path d="M50,120 L50,135 L60,135" fill="none" stroke="#6b7280" stroke-width="3"/>
             </svg>
-            <!-- Label Overlay -->
             <div class="absolute inset-0 flex flex-col items-center justify-center pt-2">
                 <span class="text-[11px] font-bold text-gray-800 mb-1 truncate w-20 text-center">${tank.name}</span>
                 <div class="px-1 py-1 rounded text-[10px] font-bold text-white text-center leading-tight ${statusBgColor} border border-black/20 w-18 shadow-inner flex items-center justify-center h-8">
@@ -1285,10 +1250,6 @@ function deleteTank(tankId) {
     showNotification('Tanque eliminado.', 'success');
 }
 
-function hasActiveProduction() {
-    return true;
-}
-
 function renderPlaneacionPlaceholder() {
     const mpsContainer = document.getElementById('mps-table-container');
     const mrpContainer = document.getElementById('mrp-table-container');
@@ -1304,27 +1265,24 @@ function renderPlaneacionPlaceholder() {
 // --- Production Flow: MPS -> MRP -> CRP ---
 function runProductionFlow() {
     const out = document.getElementById('production-output');
-    if (!hasActiveProduction()) {
-        renderPlaneacionPlaceholder();
-        if (out) out.innerHTML = '<div class="text-gray-600 italic">No hay producción activa. Inicia producción para habilitar la planeación MPS/MRP.</div>';
-        return;
-    }
     out.innerHTML = '<div class="text-blue-600 font-bold"><i class="fas fa-spinner fa-spin mr-2"></i> Calculando Plan Maestro de Producción y Requerimientos...</div>';
-    
+
     const mpsContainer = document.getElementById('mps-table-container');
     const mrpContainer = document.getElementById('mrp-table-container');
     const kpiContainer = document.getElementById('kpi-container');
 
     const finalProducts = inventory.filter(p => p.type !== 'raw');
     const rawMaterials = inventory.filter(p => p.type === 'raw');
-    
+
     // Parámetros del Sistema
-    const LITROS_POR_LOTE = 120; // 1 tanque = 1 lote = 120L
+    const LITROS_POR_LOTE = 120;
     const MAX_TANQUES_SEMANA = 6;
 
     const scheduledProduction = {};
     const scheduleEntries = [];
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const getWeekIndexFromDate = (dateStr) => {
         const date = new Date(`${dateStr}T00:00:00`);
         if (isNaN(date)) return -1;
@@ -1353,10 +1311,10 @@ function runProductionFlow() {
             });
         });
     });
-    
+
     // 1. Preparar Demanda por Semana (1 a 4)
-    const demandBarril = {}; // Litros por semana
-    const demandBotellas = {}; // Unidades por semana
+    const demandBarril = {};
+    const demandBotellas = {};
     let weeklyBarrilDemand = [0, 0, 0, 0];
     let weeklyForecastBottles = [0, 0, 0, 0];
     let weeklyForecastLiters = [0, 0, 0, 0];
@@ -1369,7 +1327,6 @@ function runProductionFlow() {
         demandBotellas[p.id] = [0, 0, 0, 0];
     });
 
-    // Helper para determinar la semana del registro histórico (definida antes de usarla)
     const getWeekIndexForHistoryEntry = (hist) => {
         if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
             return hist.week - 1;
@@ -1377,7 +1334,6 @@ function runProductionFlow() {
         return getWeekIndexFromDate(hist.startDate || hist.endDate);
     };
 
-    // Pedidos fijos y overflow se leen EXCLUSIVAMENTE del historial de producción semanal
     productionHistory.forEach(hist => {
         const wIdx = getWeekIndexForHistoryEntry(hist);
         if (wIdx >= 0 && wIdx <= 3) {
@@ -1388,44 +1344,38 @@ function runProductionFlow() {
         }
     });
 
-    // Agregar pedidos reales por producto (canal barril - órdenes de venta)
     orders.forEach(o => {
-        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
+        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBarril[o.productId]) {
-            const volume = o.qty * (inventory.find(p=>p.id===o.productId)?.volumePerUnit || 1);
+            const volume = o.qty * (inventory.find(p => p.id === o.productId)?.volumePerUnit || 1);
             demandBarril[o.productId][w] += volume;
         }
     });
 
-    // Agregar pronósticos reales (canal botellas)
     forecasts.forEach(f => {
-        const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
+        const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000 * 60 * 60 * 24));
         const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
         if (demandBotellas[f.productId]) {
             demandBotellas[f.productId][w] += f.qty;
             weeklyForecastBottles[w] += f.qty;
-            const volumePerUnit = inventory.find(p=>p.id===f.productId)?.volumePerUnit || 0.33;
+            const volumePerUnit = inventory.find(p => p.id === f.productId)?.volumePerUnit || 0.33;
             weeklyForecastLiters[w] += f.qty * volumePerUnit;
         }
     });
 
-    // (helper ya definido arriba)
-
-    // ─── LÓGICA DE NEGOCIO: Inventario Rodante + Producción Condicional ─────────
-    // Inventario inicial PT en litros (suma de todos los productos finales)
+    // Inventario inicial PT en litros
     const initialInvLiters = finalProducts.reduce(
         (sum, p) => sum + (p.quantity * (p.volumePerUnit || 0.33)), 0
     );
-    // Demanda total semanal = pedidos fijos (L) + pronósticos (L)
     const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
 
-    const weeklyInventoryInitial   = [0, 0, 0, 0];
-    const weeklyInventoryFinal     = [0, 0, 0, 0];
-    const weeklyForecastProduction = [0, 0, 0, 0]; // pronóstico condicional
-    const weeklyTotalProduction    = [0, 0, 0, 0]; // PedidosFijos + Overflow + Pronóstico
-    const weeklyBalance            = [0, 0, 0, 0];
-    const weeklyDeficit            = [false, false, false, false];
+    const weeklyInventoryInitial = [0, 0, 0, 0];
+    const weeklyInventoryFinal = [0, 0, 0, 0];
+    const weeklyForecastProduction = [0, 0, 0, 0];
+    const weeklyTotalProduction = [0, 0, 0, 0];
+    const weeklyBalance = [0, 0, 0, 0];
+    const weeklyDeficit = [false, false, false, false];
 
     let rollingInv = initialInvLiters;
     for (let w = 0; w < 4; w++) {
@@ -1433,7 +1383,6 @@ function runProductionFlow() {
         const produccionBase = weeklyBarrilDemand[w] + weeklyOverflowLiters[w];
         const demanda = weeklyDemandTotal[w];
 
-        // =SI((ProduccionBase + InvInicial) >= Demanda; 0; Demanda - (ProduccionBase + InvInicial))
         if ((produccionBase + rollingInv) >= demanda) {
             weeklyForecastProduction[w] = 0;
         } else {
@@ -1441,23 +1390,23 @@ function runProductionFlow() {
         }
 
         weeklyTotalProduction[w] = produccionBase + weeklyForecastProduction[w];
-        weeklyInventoryFinal[w]  = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
-        weeklyBalance[w]         = weeklyInventoryFinal[w] - rollingInv;
-        weeklyDeficit[w]         = demanda > (customWeeklyCapacities[w] || 720);
+        weeklyInventoryFinal[w] = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
+        weeklyBalance[w] = weeklyInventoryFinal[w] - rollingInv;
+        weeklyDeficit[w] = demanda > (customWeeklyCapacities[w] || 720);
         rollingInv = weeklyInventoryFinal[w];
     }
-    // Sincronizar weeklyProducedLiters con la producción total planificada para MPS
+
     for (let w = 0; w < 4; w++) {
         weeklyProducedLiters[w] = weeklyTotalProduction[w];
     }
 
-    // 2. Calcular MPS (Plan Maestro de Producción)
+    // 2. Calcular MPS
     let totalLiters = 0;
     let totalBottlesGen = 0;
     let lotesPorSemana = [0, 0, 0, 0];
-    const mpsPlan = {}; // [Liters W1, Liters W2, Liters W3, Liters W4]
-    const invProjectedPT = {}; // Array de inventario de botellas al final de cada semana
-    
+    const mpsPlan = {};
+    const invProjectedPT = {};
+
     let mpsHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
         <thead>
             <tr class="bg-[#005B3A] text-white">
@@ -1476,7 +1425,6 @@ function runProductionFlow() {
         invProjectedPT[p.id] = [0, 0, 0, 0];
     });
 
-    // Rellenar producción real desde historial de producción semanal (solo no activos para evitar doble conteo)
     productionHistory.forEach(hist => {
         if (hist.isActive === true) return;
         const wIdx = getWeekIndexForHistoryEntry(hist);
@@ -1486,7 +1434,6 @@ function runProductionFlow() {
         }
     });
 
-    // Rellenar también desde las producciones activas programadas en los tanques
     tanks.forEach(tank => {
         (tank.schedule || []).forEach(schedule => {
             const wIdx = getWeekIndexFromDate(schedule.start);
@@ -1498,68 +1445,49 @@ function runProductionFlow() {
     });
 
     finalProducts.forEach(p => {
-        let currentBotellas = p.quantity; // Inventario inicial PT
-        let pmpDetails = []; // Textos descriptivos para UI
-        
+        let currentBotellas = p.quantity;
+        let pmpDetails = [];
+
         for (let w = 0; w < 4; w++) {
             const unitVolume = p.volumePerUnit || 0.33;
             const litrosProducir = mpsPlan[p.id][w];
             const producedUnits = Math.round(litrosProducir / unitVolume);
-            
+
             let detail = "";
             if (w < 2) {
-                // Semanas 1 y 2: Canal Barril
                 const demandaL = demandBarril[p.id][w];
                 const overflowLitros = Math.max(0, litrosProducir - demandaL);
                 const overflowBotellas = Math.floor(overflowLitros / unitVolume);
                 currentBotellas += overflowBotellas;
-                
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Prod. Semanal / Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot</span>`;
             } else {
-                // Semanas 3 y 4: Canal Botellas
                 currentBotellas += producedUnits;
                 const demandaB = demandBotellas[p.id][w];
                 currentBotellas -= demandaB;
-                
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Prod. Semanal / Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot</span>`;
+                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot</span>`;
             }
-            
+
             invProjectedPT[p.id][w] = currentBotellas;
             lotesPorSemana[w] += Math.ceil(litrosProducir / LITROS_POR_LOTE);
             totalLiters += litrosProducir;
             pmpDetails.push(detail);
         }
-        
-        totalBottlesGen += invProjectedPT[p.id][3] - p.quantity + demandBotellas[p.id].reduce((a,b)=>a+b,0);
-        
+
         mpsHtml += `<tr>
             <td class="p-2 border font-semibold">${p.name}</td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar la demanda de esta semana" onclick="editPlanningDemand(${p.id}, 0)">
-                ${pmpDetails[0]}
-                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Demanda</span>
-            </td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar la demanda de esta semana" onclick="editPlanningDemand(${p.id}, 1)">
-                ${pmpDetails[1]}
-                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Demanda</span>
-            </td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar el pronóstico de esta semana" onclick="editPlanningDemand(${p.id}, 2)">
-                ${pmpDetails[2]}
-                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Pronóstico</span>
-            </td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors" title="Haz clic para editar el pronóstico de esta semana" onclick="editPlanningDemand(${p.id}, 3)">
-                ${pmpDetails[3]}
-                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-1"><i class="fas fa-edit"></i> Editar Pronóstico</span>
-            </td>
-            <td class="p-2 border text-center font-bold">${mpsPlan[p.id].reduce((a,b)=>a+b,0)} L</td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 0)">${pmpDetails[0]}</td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 1)">${pmpDetails[1]}</td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 2)">${pmpDetails[2]}</td>
+            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 3)">${pmpDetails[3]}</td>
+            <td class="p-2 border text-center font-bold">${mpsPlan[p.id].reduce((a, b) => a + b, 0)} L</td>
         </tr>`;
     });
-    
-    // Fila de validación de capacidad (CRP)
+
     mpsHtml += `<tr class="bg-gray-100">
         <td class="p-2 border font-bold text-right text-gray-600">Lotes a Iniciar (CRP):</td>`;
-    
+
     let isOverCapacity = false;
-    for(let w=0; w<4; w++) {
+    for (let w = 0; w < 4; w++) {
         let l = lotesPorSemana[w];
         const maxTanksThisWeek = customWeeklyCapacities[w] / LITROS_POR_LOTE;
         let alertClass = l > maxTanksThisWeek ? 'text-red-600 font-bold bg-red-100' : 'text-green-600 font-bold';
@@ -1570,13 +1498,13 @@ function runProductionFlow() {
 
     if (isOverCapacity) {
         mpsHtml = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4 font-bold">
-            <i class="fas fa-exclamation-triangle"></i> ALERTA CRÍTICA: Se ha excedido la capacidad máxima de producción en alguna de las semanas. Ajusta los pedidos o el pronóstico.
+            <i class="fas fa-exclamation-triangle"></i> ALERTA CRÍTICA: Se ha excedido la capacidad máxima de producción.
         </div>` + mpsHtml;
     }
 
-    if(mpsContainer) mpsContainer.innerHTML = mpsHtml;
+    if (mpsContainer) mpsContainer.innerHTML = mpsHtml;
 
-    // 3. Calcular MRP (Explosión de Materiales)
+    // 3. Calcular MRP
     let mrpHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
         <thead>
             <tr class="bg-[#005B3A] text-white">
@@ -1593,120 +1521,76 @@ function runProductionFlow() {
     rawMaterials.forEach(rm => {
         let inv = rm.quantity;
         let cellsHtml = '';
-        
-        for(let w=0; w<4; w++) {
-            // Explosión de Materiales: Requerimiento Bruto
+
+        for (let w = 0; w < 4; w++) {
             let reqBruto = 0;
             finalProducts.forEach(p => {
                 const recipe = recipes.find(r => r.productId === p.id);
-                if(recipe) {
+                if (recipe) {
                     const ing = recipe.ingredients.find(i => i.ingredientProductId === rm.id);
-                    if(ing) {
+                    if (ing) {
                         reqBruto += ing.qtyPerUnit * mpsPlan[p.id][w];
                     }
                 }
             });
-            
-            // Lógica MRP
+
             let invProyectado = inv - reqBruto;
             let reqNeto = 0;
             let ordenLanzada = 0;
             let aPedirEn = "";
 
-            if(invProyectado <= rm.safetyStock) {
+            if (invProyectado <= rm.safetyStock) {
                 reqNeto = rm.safetyStock - invProyectado + reqBruto;
-                
-                // Redondeo a unidad de compra (TECHO)
                 ordenLanzada = Math.ceil(reqNeto / rm.purchaseUnit) * rm.purchaseUnit;
-                invProyectado += ordenLanzada; // Simulamos la recepción en esta semana
-                
-                // Desplazamiento por Lead Time para lanzar la orden
-                let dt = rm.leadTime; // leadTime en semanas
+                invProyectado += ordenLanzada;
+
+                let dt = rm.leadTime;
                 let semanaLanzamiento = (w + 1) - dt;
-                
+
                 if (semanaLanzamiento <= 0) {
-                    aPedirEn = `<div class="mt-1 text-[10px] bg-red-100 text-red-800 p-1 rounded font-bold border border-red-300 mb-1">¡PEDIDO URGENTE! ${ordenLanzada.toFixed(0)} ${rm.name.includes('und')||rm.name.includes('Botellas')?'und':'kg'}</div>
-                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 hover:bg-blue-600 text-white py-1 px-1 rounded font-bold shadow"><i class="fas fa-truck-loading"></i> Reabastecer</button>`;
+                    aPedirEn = `<div class="mt-1 text-[10px] bg-red-100 text-red-800 p-1 rounded font-bold">¡URGENTE! ${ordenLanzada.toFixed(0)}</div>
+                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 text-white py-0.5 px-1 rounded font-bold"><i class="fas fa-truck-loading"></i> Recargar</button>`;
                 } else {
-                    aPedirEn = `<div class="mt-1 text-[10px] bg-amber-100 text-amber-800 p-1 rounded font-bold border border-amber-300 mb-1">Lanzar Orden Sem ${semanaLanzamiento}: ${ordenLanzada.toFixed(0)}</div>
-                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 hover:bg-blue-600 text-white py-1 px-1 rounded font-bold shadow"><i class="fas fa-truck-loading"></i> Reabastecer</button>`;
+                    aPedirEn = `<div class="mt-1 text-[10px] bg-amber-100 text-amber-800 p-1 rounded font-bold">Pedir Sem ${semanaLanzamiento}: ${ordenLanzada.toFixed(0)}</div>
+                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 text-white py-0.5 px-1 rounded font-bold"><i class="fas fa-truck-loading"></i> Recargar</button>`;
                 }
             }
 
             cellsHtml += `<td class="p-2 border text-center text-xs">
-                Req: <span class="text-red-600 font-semibold">${formatDecimal(reqBruto)}</span><br>
-                Inv: <span class="text-blue-600 font-semibold">${formatDecimal(invProyectado)}</span>
+                Req: <span class="text-red-600">${formatDecimal(reqBruto)}</span><br>
+                Inv: <span class="text-blue-600">${formatDecimal(invProyectado)}</span>
                 ${aPedirEn}
             </td>`;
             inv = invProyectado;
         }
-        
+
         mrpHtml += `<tr>
-            <td class="p-2 border font-semibold">${rm.name}<br><span class="text-[10px] text-gray-500">SS: ${formatDecimal(rm.safetyStock)} | Lote: ${formatDecimal(rm.purchaseUnit)} | LT: ${formatDecimal(rm.leadTime)} Sem</span></td>
+            <td class="p-2 border font-semibold">${rm.name}</td>
             <td class="p-2 border text-center bg-gray-50 font-bold">${formatDecimal(rm.quantity)}</td>
             ${cellsHtml}
         </tr>`;
     });
     mrpHtml += `</tbody></table>`;
-    if(mrpContainer) mrpContainer.innerHTML = mrpHtml;
-
-    // 4. Resumen Ejecutivo (KPIs)
-    let finalInvTotal = 0;
-    let finalInvLiters = 0;
-    finalProducts.forEach(p => {
-        const finalQty = invProjectedPT[p.id][3] || 0;
-        finalInvTotal += finalQty;
-        finalInvLiters += finalQty * (p.volumePerUnit || 0.33);
-    });
-
-    if(kpiContainer) {
-        const totalPlanned      = weeklyTotalProduction.reduce((a,b)=>a+b,0);
-        const totalBarrilKpi    = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
-        const totalOverflowKpi  = weeklyOverflowLiters.reduce((a,b)=>a+b,0);
-        const totalForecastProd = weeklyForecastProduction.reduce((a,b)=>a+b,0);
-        const totalDemandMonth  = weeklyDemandTotal.reduce((a,b)=>a+b,0);
-        const monthlyCapKpi     = customWeeklyCapacities.reduce((a,b)=>a+b,0);
-        const pctBarril     = totalPlanned > 0 ? Math.round((totalBarrilKpi   / totalPlanned) * 100) : 0;
-        const pctOverflow   = totalPlanned > 0 ? Math.round((totalOverflowKpi / totalPlanned) * 100) : 0;
-        const pctForecast   = totalPlanned > 0 ? Math.round((totalForecastProd/ totalPlanned) * 100) : 0;
-        const pctCapacity   = monthlyCapKpi > 0 ? Math.round((totalPlanned / monthlyCapKpi) * 100) : 0;
-        const hasDeficit    = weeklyDeficit.some(d => d);
-        kpiContainer.innerHTML = `
-            <div class="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center shadow-sm">
-                <p class="text-xs text-green-800 font-bold mb-1">Producción Total Planificada</p>
-                <p class="text-2xl font-black text-green-600">${formatDecimal(totalPlanned)} L</p>
-                <p class="text-xs text-green-700 mt-1">Demanda: ${formatDecimal(totalDemandMonth)} L</p>
-            </div>
-            <div class="flex-1 ${pctCapacity > 100 ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'} p-4 rounded-lg border text-center shadow-sm">
-                <p class="text-xs ${pctCapacity > 100 ? 'text-red-800' : 'text-blue-800'} font-bold mb-1">% Uso de Capacidad</p>
-                <p class="text-2xl font-black ${pctCapacity > 100 ? 'text-red-600' : 'text-blue-600'}">${pctCapacity}%</p>
-                <p class="text-xs text-gray-500 mt-1">Cap: ${formatDecimal(monthlyCapKpi)} L / mes</p>
-            </div>
-            <div class="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-200 text-center shadow-sm">
-                <p class="text-xs text-amber-800 font-bold mb-1">Participación por Tipo</p>
-                <p class="text-xs text-gray-700 mt-2">🔵 Pedidos Fijos: <strong>${pctBarril}%</strong></p>
-                <p class="text-xs text-gray-700">🟠 Overflow: <strong>${pctOverflow}%</strong></p>
-                <p class="text-xs text-gray-700">🟢 Pronóstico: <strong>${pctForecast}%</strong></p>
-            </div>
-            <div class="flex-1 ${hasDeficit ? 'bg-red-50 border-red-300' : 'bg-purple-50 border-purple-200'} p-4 rounded-lg border text-center shadow-sm">
-                <p class="text-xs ${hasDeficit ? 'text-red-800' : 'text-purple-800'} font-bold mb-1">Inv. Final Proyectado (L)</p>
-                <p class="text-2xl font-black ${hasDeficit ? 'text-red-600' : 'text-purple-600'}">${formatDecimal(weeklyInventoryFinal[3])} L</p>
-                <p class="text-xs ${hasDeficit ? 'text-red-600 font-bold' : 'text-gray-500'} mt-1">${hasDeficit ? '⚠️ Déficit en alguna semana' : '✅ Sin déficit proyectado'}</p>
-            </div>
-        `;
+    // Asegurar que la producción total usada en las tablas refleje lo acumulado
+    // en `weeklyProducedLiters` (incluye producciones en tanques y history).
+    for (let w = 0; w < 4; w++) {
+        weeklyTotalProduction[w] = weeklyProducedLiters[w] || 0;
     }
+
+    if (mrpContainer) mrpContainer.innerHTML = mrpHtml;
 
     const volumeTable = document.getElementById('production-volume-table');
     const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
     const demandTable = document.getElementById('production-demand-table');
     const inventoryTable = document.getElementById('production-inventory-table');
 
-    if(volumeTable || weeklyVolumeTable) {
-        const monthlyCapacity    = customWeeklyCapacities.reduce((a, b) => a + b, 0);
-        const barrilTotal        = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
-        const overflowTotalLiters= weeklyOverflowLiters.reduce((a,b)=>a+b,0);
-        const forecastProdTotal  = weeklyForecastProduction.reduce((a,b)=>a+b,0);
-        const producedTotal      = weeklyTotalProduction.reduce((a,b)=>a+b,0);
+    // 4. Renderizar Tabla de Volúmenes sin la fila de Capacidad Disponible
+    if (volumeTable || weeklyVolumeTable) {
+        const barrilTotal = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
+        const overflowTotalLiters = weeklyOverflowLiters.reduce((a, b) => a + b, 0);
+        // Incluir producción asignada en tanques dentro de la fila de pronóstico
+        const forecastProdTotal = weeklyForecastProduction.reduce((a, b) => a + b, 0) + (weeklyProducedLiters ? weeklyProducedLiters.reduce((a, b) => a + b, 0) : 0);
+        const producedTotal = weeklyTotalProduction.reduce((a, b) => a + b, 0);
 
         const tableHtml = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
@@ -1724,69 +1608,39 @@ function runProductionFlow() {
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold text-[13px]">🔵 Pedidos Fijos — Barril (L)</td>
-                        ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center">
-                                <span class="font-semibold text-gray-800 text-sm">${formatDecimal(weeklyBarrilDemand[w])} L</span>
-                            </td>
-                        `).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(barrilTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (producedTotal || 1)) * 100)}%</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold text-[13px]">🟠 Overflow Embotellado (L)</td>
-                        ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center">
-                                <span class="font-semibold text-gray-800 text-sm">${formatDecimal(weeklyOverflowLiters[w])} L</span>
-                            </td>
-                        `).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(overflowTotalLiters)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (producedTotal || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">🟢 Producción según pronóstico (L) <span class="text-[10px] text-gray-400 font-normal block">Solo produce lo necesario</span></td>
-                        ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'bg-blue-50' : 'bg-amber-50'}">
-                                <span class="font-semibold text-sm ${weeklyForecastProduction[w] === 0 ? 'text-blue-700' : 'text-amber-700'}">${formatDecimal(weeklyForecastProduction[w])} L</span>
-                                ${weeklyForecastProduction[w] === 0 ? '<span class="text-[9px] text-blue-500 block">Inv. cubre demanda</span>' : ''}
-                            </td>
-                        `).join('')}
+                        <td class="p-2 border font-semibold text-[13px]">🟢 Producción según pronóstico (L)</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal((weeklyForecastProduction[w]||0) + (weeklyProducedLiters ? (weeklyProducedLiters[w]||0) : 0))} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(forecastProdTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((forecastProdTotal / (producedTotal || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-[#1a1a2e] text-white">
                         <td class="p-2 border font-bold text-sm">⚡ PRODUCCIÓN TOTAL PLANIFICADA (L)</td>
-                        ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">
-                                <span class="font-bold text-white">${formatDecimal(weeklyTotalProduction[w])} L</span>
-                                ${weeklyDeficit[w] ? '<span class="text-[9px] text-red-200 block">⚠️ Excede capacidad</span>' : ''}
-                            </td>
-                        `).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyTotalProduction[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(producedTotal)} L</td>
                         <td class="p-2 border text-center font-bold">100%</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2 border font-semibold text-[13px]">📊 Capacidad Disponible (L) <span class="text-[10px] text-green-600 font-normal">✏ clic para editar</span></td>
-                        ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors ${weeklyDeficit[w] ? 'border-l-4 border-l-red-400' : ''}" onclick="editWeeklyCapacity(${w})">
-                                <span class="font-semibold text-gray-800">${customWeeklyCapacities[w]} L</span>
-                                <span class="text-[9px] text-green-700 block"><i class="fas fa-edit"></i></span>
-                            </td>
-                        `).join('')}
-                        <td class="p-2 border text-center font-bold">${monthlyCapacity} L</td>
-                        <td class="p-2 border text-center font-semibold text-gray-500">—</td>
                     </tr>
                 </tbody>
             </table>
         `;
-
         if (volumeTable) volumeTable.innerHTML = tableHtml;
         if (weeklyVolumeTable) weeklyVolumeTable.innerHTML = tableHtml;
     }
 
-    if(demandTable) {
+    if (demandTable) {
         const monthlyCapacity = customWeeklyCapacities.reduce((a, b) => a + b, 0);
-        const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
-        const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
+        const barrilTotal = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
+        const forecastTotal = weeklyForecastLiters.reduce((a, b) => a + b, 0);
         const totalDemand = barrilTotal + forecastTotal;
         demandTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
@@ -1816,7 +1670,7 @@ function runProductionFlow() {
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">TOTAL (L)</td>
-                        ${weeklyBarrilDemand.map((_,i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
+                        ${weeklyBarrilDemand.map((_, i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${formatDecimal(totalDemand)}</td>
                         <td class="p-2 border text-center font-semibold">${Math.round((totalDemand / (monthlyCapacity || 1)) * 100)}%</td>
                     </tr>
@@ -1825,7 +1679,7 @@ function runProductionFlow() {
         `;
     }
 
-    if(inventoryTable) {
+    if (inventoryTable) {
         const startLiters = initialInvLiters;
 
         inventoryTable.innerHTML = `
@@ -1834,7 +1688,7 @@ function runProductionFlow() {
                     <tr>
                         <th class="p-2 border">Concepto</th>
                         <th class="p-2 border text-center bg-gray-600">Inicial (S0)</th>
-                        ${[0,1,2,3].map(w => `<th class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : ''}">Semana ${w+1}${weeklyDeficit[w] ? ' ⚠️' : ''}</th>`).join('')}
+                        ${[0, 1, 2, 3].map(w => `<th class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : ''}">Semana ${w + 1}${weeklyDeficit[w] ? ' ⚠️' : ''}</th>`).join('')}
                         <th class="p-2 border text-center bg-[#005B3A]">Total / Final</th>
                     </tr>
                 </thead>
@@ -1842,49 +1696,49 @@ function runProductionFlow() {
                     <tr class="bg-blue-50">
                         <td class="p-2 border font-semibold text-[13px]">📦 Inventario Inicial (L)</td>
                         <td class="p-2 border text-center font-bold text-blue-700">${formatDecimal(startLiters)} L</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-blue-600 font-semibold">${formatDecimal(weeklyInventoryInitial[w])} L</td>`).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-blue-600 font-semibold">${formatDecimal(weeklyInventoryInitial[w])} L</td>`).join('')}
                         <td class="p-2 border text-center text-gray-400">—</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold text-[13px]">🔵 + Pedidos Fijos (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyBarrilDemand.reduce((a,b)=>a+b,0))} L</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyBarrilDemand.reduce((a, b) => a + b, 0))} L</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold text-[13px]">🟠 + Overflow (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyOverflowLiters.reduce((a,b)=>a+b,0))} L</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyOverflowLiters.reduce((a, b) => a + b, 0))} L</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold text-[13px]">🟢 + Pronóstico (L) <span class="text-[9px] text-gray-400 font-normal block">Solo si hace falta</span></td>
+                        <td class="p-2 border font-semibold text-[13px]">🟢 + Pronóstico (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'text-blue-500' : 'text-amber-600 font-semibold'}">${formatDecimal(weeklyForecastProduction[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastProduction.reduce((a,b)=>a+b,0))} L</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'text-blue-500' : 'text-amber-600 font-semibold'}">${formatDecimal(weeklyForecastProduction[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastProduction.reduce((a, b) => a + b, 0))} L</td>
                     </tr>
                     <tr class="bg-[#1a1a2e] text-white">
                         <td class="p-2 border font-bold text-[13px]">⚡ = Producción Total (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-bold ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">${formatDecimal(weeklyTotalProduction[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(weeklyTotalProduction.reduce((a,b)=>a+b,0))} L</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">${formatDecimal(weeklyTotalProduction[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(weeklyTotalProduction.reduce((a, b) => a + b, 0))} L</td>
                     </tr>
                     <tr class="bg-red-50">
                         <td class="p-2 border font-semibold text-[13px] text-red-800">🔴 − Demanda Total (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-red-700 font-semibold ${weeklyDeficit[w] ? 'bg-red-100 font-bold' : ''}">${formatDecimal(weeklyDemandTotal[w])} L${weeklyDeficit[w] ? ' ⚠️' : ''}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold text-red-700">${formatDecimal(weeklyDemandTotal.reduce((a,b)=>a+b,0))} L</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center text-red-700 font-semibold ${weeklyDeficit[w] ? 'bg-red-100 font-bold' : ''}">${formatDecimal(weeklyDemandTotal[w])} L${weeklyDeficit[w] ? ' ⚠️' : ''}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold text-red-700">${formatDecimal(weeklyDemandTotal.reduce((a, b) => a + b, 0))} L</td>
                     </tr>
                     <tr class="bg-green-50">
                         <td class="p-2 border font-bold text-[13px] text-green-800">📊 = Inventario Final (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-bold ${weeklyInventoryFinal[w] < 0 ? 'bg-red-100 text-red-700' : 'text-green-700'}">${formatDecimal(weeklyInventoryFinal[w])} L</td>`).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold ${weeklyInventoryFinal[w] < 0 ? 'bg-red-100 text-red-700' : 'text-green-700'}">${formatDecimal(weeklyInventoryFinal[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold text-green-700">${formatDecimal(weeklyInventoryFinal[3])} L</td>
                     </tr>
                     <tr>
                         <td class="p-2 border font-semibold text-[13px] text-gray-600">⚖️ Balance Semanal (L)</td>
                         <td class="p-2 border text-center text-gray-400">—</td>
-                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyBalance[w] >= 0 ? 'text-green-600' : 'text-red-600'}">${weeklyBalance[w] >= 0 ? '+' : ''}${formatDecimal(weeklyBalance[w])} L</td>`).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyBalance[w] >= 0 ? 'text-green-600' : 'text-red-600'}">${weeklyBalance[w] >= 0 ? '+' : ''}${formatDecimal(weeklyBalance[w])} L</td>`).join('')}
                         <td class="p-2 border text-center text-gray-400">—</td>
                     </tr>
                 </tbody>
@@ -1892,27 +1746,81 @@ function runProductionFlow() {
         `;
     }
 
+    if (kpiContainer) {
+        const monthlyCapKpi = customWeeklyCapacities.reduce((a, b) => a + b, 0);
+        const totalProduced = weeklyTotalProduction.reduce((a, b) => a + b, 0);
+        const totalDemand = weeklyDemandTotal.reduce((a, b) => a + b, 0);
+        const pctCapacity = monthlyCapKpi > 0 ? Math.round((totalProduced / monthlyCapKpi) * 100) : 0;
+        const finalInventory = weeklyInventoryFinal[3];
+        const hasDeficit = weeklyDeficit.some(d => d);
+        
+        // Calcular participación por tipo
+        const totalBarril = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
+        const totalOverflow = weeklyOverflowLiters.reduce((a, b) => a + b, 0);
+        const totalForecast = weeklyForecastProduction.reduce((a, b) => a + b, 0);
+        const totalDemandType = totalBarril + totalOverflow + totalForecast || 1;
+        const pctBarril = Math.round((totalBarril / totalDemandType) * 100);
+        const pctOverflow = Math.round((totalOverflow / totalDemandType) * 100);
+        const pctForecast = Math.round((totalForecast / totalDemandType) * 100);
+        
+        kpiContainer.innerHTML = `
+            <div class="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center shadow-sm">
+                <p class="text-xs text-green-800 font-bold mb-1">Producción Total Planificada</p>
+                <p class="text-2xl font-black text-green-600">${formatDecimal(totalProduced)} L</p>
+                <p class="text-xs text-gray-600 mt-1">Demanda: ${formatDecimal(totalDemand)} L</p>
+            </div>
+            <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
+                <p class="text-xs text-blue-800 font-bold mb-1">% Uso de Capacidad</p>
+                <p class="text-2xl font-black text-blue-600">${pctCapacity}%</p>
+                <p class="text-xs text-gray-600 mt-1">Cap: ${formatDecimal(monthlyCapKpi)} L / mes</p>
+            </div>
+            <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
+                <p class="text-xs text-purple-800 font-bold mb-2">Participación por Tipo</p>
+                <div class="space-y-1 text-xs text-gray-700">
+                    <p>🔵 Pedidos Fijos: ${pctBarril}%</p>
+                    <p>🟠 Overflow: ${pctOverflow}%</p>
+                    <p>🟢 Pronóstico: ${pctForecast}%</p>
+                </div>
+            </div>
+            <div class="flex-1 ${hasDeficit ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} p-4 rounded-lg border text-center shadow-sm">
+                <p class="text-xs ${hasDeficit ? 'text-red-800' : 'text-emerald-800'} font-bold mb-1">Inv. Final Proyectado (L)</p>
+                <p class="text-2xl font-black ${hasDeficit ? 'text-red-600' : 'text-emerald-600'}">${formatDecimal(finalInventory)} L</p>
+                <p class="text-xs ${hasDeficit ? 'text-red-700' : 'text-emerald-700'} font-semibold mt-1">${hasDeficit ? '⚠️ Con déficit proyectado' : '✅ Sin déficit proyectado'}</p>
+            </div>
+        `;
+    }
+
+    // Exponer datos del último cálculo para depuración (temporal)
+    try {
+        window._lastProductionCalc = {
+            weeklyProducedLiters: typeof weeklyProducedLiters !== 'undefined' ? weeklyProducedLiters : null,
+            weeklyTotalProduction: typeof weeklyTotalProduction !== 'undefined' ? weeklyTotalProduction : null,
+            weeklyBarrilDemand: typeof weeklyBarrilDemand !== 'undefined' ? weeklyBarrilDemand : null,
+            weeklyForecastProduction: typeof weeklyForecastProduction !== 'undefined' ? weeklyForecastProduction : null,
+            weeklyOverflowLiters: typeof weeklyOverflowLiters !== 'undefined' ? weeklyOverflowLiters : null,
+            weeklyDemandTotal: typeof weeklyDemandTotal !== 'undefined' ? weeklyDemandTotal : null
+        };
+    } catch (e) { console.error('debug export failed', e); }
+
     out.innerHTML = `<div class="text-green-700 font-bold bg-green-50 p-3 border border-green-200 rounded"><i class="fas fa-check-circle mr-1"></i> Cálculo MRP y MPS finalizado. Validaciones completadas.</div>`;
 }
 
 function editPlanningDemand(productId, weekIndex) {
     const product = inventory.find(p => p.id === productId);
     if (!product) return;
-    
+
     const isBarril = weekIndex < 2;
-    const title = isBarril 
+    const title = isBarril
         ? `Editar Pedido Fijo (Barril) para ${product.name} en Semana ${weekIndex + 1} (Litros):`
         : `Editar Pronóstico (Botellas) para ${product.name} en Semana ${weekIndex + 1} (Unidades):`;
-        
-    // Calcular cantidad actual agrupada
+
     let currentQty = 0;
     const today = new Date();
-    
+
     if (isBarril) {
-        // Pedidos fijos
         const weekOrders = orders.filter(o => {
             if (o.productId !== productId) return false;
-            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
+            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
             const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
             return w === weekIndex;
         });
@@ -1920,37 +1828,34 @@ function editPlanningDemand(productId, weekIndex) {
         const totalUnits = weekOrders.reduce((sum, o) => sum + o.qty, 0);
         currentQty = totalUnits * volumePerUnit;
     } else {
-        // Pronósticos
         const weekForecasts = forecasts.filter(f => {
             if (f.productId !== productId) return false;
-            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
+            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000 * 60 * 60 * 24));
             const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
             return w === weekIndex;
         });
         currentQty = weekForecasts.reduce((sum, f) => sum + f.qty, 0);
     }
-    
+
     const valInput = prompt(title, currentQty);
     if (valInput === null || valInput.trim() === "") return;
-    
+
     const newQty = parseFloat(valInput);
     if (isNaN(newQty) || newQty < 0) {
         return showNotification('Cantidad inválida.', 'error');
     }
-    
-    // Guardar y Actualizar
+
     if (isBarril) {
         const volumePerUnit = product.volumePerUnit || 1;
         const newUnits = newQty / volumePerUnit;
-        
-        // Quitar pedidos anteriores de esta semana
+
         orders = orders.filter(o => {
             if (o.productId !== productId) return true;
-            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000*60*60*24));
+            const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
             const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
             return w !== weekIndex;
         });
-        
+
         if (newQty > 0) {
             const targetDate = getDateForWeekOffset(weekIndex);
             orders.push({
@@ -1962,14 +1867,13 @@ function editPlanningDemand(productId, weekIndex) {
             });
         }
     } else {
-        // Quitar pronósticos anteriores de esta semana
         forecasts = forecasts.filter(f => {
             if (f.productId !== productId) return true;
-            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000*60*60*24));
+            const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000 * 60 * 60 * 24));
             const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
             return w !== weekIndex;
         });
-        
+
         if (newQty > 0) {
             const targetDate = getDateForWeekOffset(weekIndex);
             forecasts.push({
@@ -1980,7 +1884,7 @@ function editPlanningDemand(productId, weekIndex) {
             });
         }
     }
-    
+
     saveData();
     refreshAppUI();
     runProductionFlow();
@@ -1991,12 +1895,12 @@ function editWeeklyCapacity(weekIndex) {
     const currentVal = customWeeklyCapacities[weekIndex] || 720;
     const valInput = prompt(`Ingrese la capacidad de producción para la Semana ${weekIndex + 1} (en Litros):`, currentVal);
     if (valInput === null || valInput.trim() === "") return;
-    
+
     const newVal = parseFloat(valInput);
     if (isNaN(newVal) || newVal <= 0) {
         return showNotification('Por favor ingrese un valor numérico válido mayor a 0.', 'error');
     }
-    
+
     customWeeklyCapacities[weekIndex] = newVal;
     saveData();
     refreshAppUI();
@@ -2017,24 +1921,24 @@ function editWeeklyVolumeTableValue(type, weekIndex) {
         currentVal = customWeeklyForecastLiters[weekIndex];
         label = "Producción según pronósticos (L)";
     }
-    
+
     const valInput = prompt(`Ingrese el valor para ${label} en la Semana ${weekIndex + 1}:`, currentVal);
     if (valInput === null || valInput.trim() === "") return;
-    
+
     const newVal = parseFloat(valInput);
     if (isNaN(newVal) || newVal < 0) {
         return showNotification('Por favor ingrese un valor numérico válido mayor o igual a 0.', 'error');
     }
-    
+
     if (type === 'barril') {
         customWeeklyBarrilDemand[weekIndex] = newVal;
     } else if (type === 'overflow_bottles') {
         customWeeklyOverflowBottles[weekIndex] = newVal;
-        customWeeklyOverflowLiters[weekIndex] = newVal * 0.33; // Convert bottles to liters assuming 0.33L per bottle
+        customWeeklyOverflowLiters[weekIndex] = newVal * 0.33;
     } else if (type === 'forecast') {
         customWeeklyForecastLiters[weekIndex] = newVal;
     }
-    
+
     saveData();
     refreshAppUI();
     runProductionFlow();
@@ -2056,17 +1960,15 @@ function createSection(title, text) {
 }
 
 function getBatchesByProduct(productId) {
-    return batches.filter(b => b.productId === productId && b.quantity > 0).sort((a,b) => new Date(a.manufactureDate) - new Date(b.manufactureDate));
+    return batches.filter(b => b.productId === productId && b.quantity > 0).sort((a, b) => new Date(a.manufactureDate) - new Date(b.manufactureDate));
 }
 
 function allocateFromBatches(productId, qtyNeeded) {
-    // Consume lotes FIFO. Retorna true si se puede cumplir.
-    const available = getBatchesByProduct(productId).reduce((s,b)=>s+b.quantity,0);
+    const available = getBatchesByProduct(productId).reduce((s, b) => s + b.quantity, 0);
     if (available < qtyNeeded) {
         return false;
     }
     let remaining = qtyNeeded;
-    // Recorremos lotes
     const sorted = getBatchesByProduct(productId);
     for (let batch of sorted) {
         if (remaining <= 0) break;
@@ -2074,7 +1976,6 @@ function allocateFromBatches(productId, qtyNeeded) {
         batch.quantity -= take;
         remaining -= take;
     }
-    // Limpiar lotes con 0
     batches = batches.filter(b => b.quantity > 0);
     saveData();
     loadBatches();
@@ -2124,8 +2025,7 @@ function refreshAppUI() {
     updateWizardTankSelect();
     renderTrackingActive();
     renderTrackingHistory();
-    
-    // Ejecutar flujo de producción de forma incondicional
+
     runProductionFlow();
 
     if (!document.getElementById('tab-semanal')?.classList.contains('hidden')) {
@@ -2224,29 +2124,6 @@ function renderNotificationBell() {
     }
 }
 
-function openNotificationsModal() {
-    const list = document.getElementById('notifications-list');
-    const alerts = getAlerts();
-    if (!list) return;
-
-    if (alerts.length === 0) {
-        list.innerHTML = `<div class="p-4 bg-green-50 border border-green-200 rounded text-green-700">No hay alertas en este momento.</div>`;
-    } else {
-        list.innerHTML = alerts.map(alert => `
-            <div class="p-4 rounded border ${alert.type === 'Materia Prima' ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-700'}">
-                <div class="font-bold text-sm mb-1">${alert.type}</div>
-                <div class="text-sm">${alert.message}</div>
-            </div>
-        `).join('');
-    }
-
-    document.getElementById('notifications-modal').classList.remove('hidden');
-}
-
-function closeNotificationsModal() {
-    document.getElementById('notifications-modal').classList.add('hidden');
-}
-
 // --- Tank Info Modal ---
 function openTankInfoModal(id) {
     const tank = tanks.find(t => t.id === id);
@@ -2254,7 +2131,7 @@ function openTankInfoModal(id) {
 
     document.getElementById('tank-info-title').textContent = `Tanque: ${tank.name}`;
     const content = document.getElementById('tank-info-content');
-    
+
     const todayStr = getLocalDateStr();
     let activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr);
     let isFuture = false;
@@ -2275,14 +2152,14 @@ function openTankInfoModal(id) {
         const fermentationEnd = activeSchedule.fermentationEnd || addDays(activeSchedule.start, fermentationDays);
         const bottlingEnd = activeSchedule.bottlingEnd || addDays(fermentationEnd, bottlingDays);
         const packagingEnd = activeSchedule.packagingEnd || addDays(bottlingEnd, packagingDays);
-        
+
         const startDate = new Date(`${activeSchedule.start}T00:00:00`);
         const endDate = new Date(`${activeSchedule.end}T00:00:00`);
         const today = new Date();
         const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
         const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
         const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
-        
+
         if (isFuture) {
             const daysToStart = diffDays(todayStr, activeSchedule.start);
             html += `
@@ -2320,13 +2197,12 @@ function openTankInfoModal(id) {
             `;
         }
 
-        // Ingredientes implementados
         const recipe = recipes.find(r => r.productId === activeSchedule.productId);
         if (recipe && recipe.ingredients && recipe.ingredients.length > 0) {
             html += `<div class="mt-4 p-4 bg-gray-50 rounded-md border border-gray-200">
                 <h3 class="font-bold mb-2 text-gray-800"><i class="fas fa-clipboard-list"></i> Ingredientes Utilizados:</h3>
                 <ul class="list-disc pl-5 space-y-1 text-gray-700">`;
-            
+
             const totalUnits = prod && prod.volumePerUnit ? (activeSchedule.qty / prod.volumePerUnit) : activeSchedule.qty;
 
             recipe.ingredients.forEach(ing => {
@@ -2336,7 +2212,7 @@ function openTankInfoModal(id) {
             });
             html += `</ul></div>`;
         }
-        
+
         const scheduleIdx = (tank.schedule || []).indexOf(activeSchedule);
         html += `
             <div class="flex gap-2 mt-4">
@@ -2351,12 +2227,67 @@ function openTankInfoModal(id) {
                 <h3 class="font-bold text-green-800 text-lg"><i class="fas fa-check-circle"></i> Tanque Libre</h3>
                 <p class="text-green-700 mt-1">Este tanque está vacío y listo para un nuevo lote de producción.</p>
             </div>
-            <button onclick="openTankScheduleForm(${tank.id}, false)" class="mt-4 px-4 py-2 w-full bg-[#005B3A] text-white rounded-md hover:bg-[#00422a] transition-colors font-bold"><i class="fas fa-fill-drip mr-2"></i> Llenar Tanque Manualmente</button>
+            <button onclick="openTankScheduleForm(${tank.id}, false)" class="mt-4 px-4 py-2 w-full bg-green-700 text-white rounded-md hover:bg-green-800 font-bold"><i class="fas fa-fill-drip mr-2"></i> Llenar Tanque Manualmente</button>
         `;
     }
 
     content.innerHTML = html;
     document.getElementById('tank-info-modal').classList.remove('hidden');
+}
+
+function deleteActiveProduction(tankId, scheduleIdx) {
+    if (!confirm('ATENCIÓN: ¿Deseas CANCELAR esta producción? Se vaciará el tanque pero NO se recuperará la materia prima.')) return;
+    const tank = tanks.find(t => t.id === tankId);
+    const schedule = tank.schedule[scheduleIdx];
+
+    if (schedule.id) {
+        productionHistory = productionHistory.filter(hist => hist.id !== schedule.id);
+    }
+
+    tank.schedule.splice(scheduleIdx, 1);
+    saveData();
+    refreshAppUI();
+    showNotification('Producción cancelada y tanque liberado.', 'info');
+}
+
+function deleteTrackingHistoryEntry(entryId) {
+    if (!confirm('¿Seguro quieres eliminar este registro del historial de producción?')) return;
+    productionHistory = productionHistory.filter(hist => hist.id !== entryId);
+    saveData();
+    renderTrackingHistory();
+    if (document.getElementById('tab-semanal') && !document.getElementById('tab-semanal').classList.contains('hidden')) {
+        renderWeeklyProductionTab();
+    }
+    showNotification('Registro eliminado del historial.', 'success');
+}
+
+function renderTrackingHistory() {
+    const container = document.getElementById('tracking-history-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!productionHistory || productionHistory.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 italic p-4 text-center border rounded">No hay historial de producciones terminadas.</p>';
+        return;
+    }
+
+    productionHistory.forEach(hist => {
+        const prod = inventory.find(p => p.id === hist.productId);
+        const div = document.createElement('div');
+        div.className = 'p-3 border-b border-gray-100 hover:bg-gray-50 text-sm flex justify-between items-center';
+        div.innerHTML = `
+            <div>
+                <span class="font-bold text-gray-800">${prod ? prod.name : 'Prod.'}</span>
+                <span class="text-gray-500 ml-2">(${hist.qtyLiters}L &rarr; ${hist.qtyUnits} und)</span>
+                <div class="text-xs text-gray-400 mt-1">Tanque: ${hist.tankName} | ${hist.startDate} al ${hist.endDate}</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded">Completado</span>
+                <button onclick="deleteTrackingHistoryEntry(${hist.id})" class="text-red-600 hover:text-red-800 p-1" title="Eliminar del historial"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        `;
+        container.appendChild(div);
+    });
 }
 
 function closeTankInfoModal() {
@@ -2374,7 +2305,6 @@ function openTankScheduleForm(tankId, isEdit) {
     document.getElementById('tank-schedule-edit').value = isEdit ? '1' : '0';
     document.getElementById('tank-schedule-title').textContent = isEdit ? 'Editar Lote en Tanque' : 'Llenar Tanque Manualmente';
 
-    // Poblar select de productos
     const select = document.getElementById('tank-schedule-product');
     select.innerHTML = '<option value="">-- Selecciona Producto --</option>';
     const finalProducts = inventory.filter(p => p.type !== 'raw');
@@ -2386,7 +2316,7 @@ function openTankScheduleForm(tankId, isEdit) {
     });
 
     const todayStr = getLocalDateStr();
-    
+
     if (isEdit) {
         const activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr && s.end >= todayStr);
         if (activeSchedule) {
@@ -2403,7 +2333,7 @@ function openTankScheduleForm(tankId, isEdit) {
         document.getElementById('tank-schedule-bottling-days').value = 2;
         document.getElementById('tank-schedule-packaging-days').value = 1;
         document.getElementById('tank-schedule-start').value = todayStr;
-        suggestTankScheduleEnd(); // Sugerir fecha final con tiempos default
+        suggestTankScheduleEnd();
     }
 
     document.getElementById('tank-schedule-modal').classList.remove('hidden');
@@ -2431,7 +2361,7 @@ function saveTankSchedule(event) {
     event.preventDefault();
     const tankId = parseInt(document.getElementById('tank-schedule-id').value);
     const isEdit = document.getElementById('tank-schedule-edit').value === '1';
-    
+
     const productId = parseInt(document.getElementById('tank-schedule-product').value);
     const qty = parseFloat(document.getElementById('tank-schedule-qty').value);
     const start = document.getElementById('tank-schedule-start').value;
@@ -2446,7 +2376,7 @@ function saveTankSchedule(event) {
     if (qty > tank.capacityLiters) {
         return showNotification(`La cantidad (${qty}L) supera la capacidad del tanque (${tank.capacityLiters}L).`, 'error');
     }
-    
+
     if (new Date(start) >= new Date(end)) {
         return showNotification('La fecha de fin debe ser posterior a la fecha de inicio.', 'error');
     }
@@ -2498,13 +2428,11 @@ function switchProductionTab(tabId) {
     const btnSemanal = document.getElementById('tab-btn-semanal');
     const btnPlaneacion = document.getElementById('tab-btn-planeacion');
 
-    // Hide all
     if (tabNueva) tabNueva.classList.add('hidden');
     tabSeguimiento.classList.add('hidden');
     if (tabSemanal) tabSemanal.classList.add('hidden');
     if (tabPlaneacion) tabPlaneacion.classList.add('hidden');
-    
-    // Reset buttons
+
     if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     btnSeguimiento.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
@@ -2528,15 +2456,9 @@ function switchProductionTab(tabId) {
     } else if (tabId === 'planeacion') {
         if (tabPlaneacion) tabPlaneacion.classList.remove('hidden');
         if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
-        if (hasActiveProduction()) {
-            runProductionFlow();
-        } else {
-            renderPlaneacionPlaceholder();
-        }
+        runProductionFlow();
     }
 }
-
-// -- Wizard (Paso a Paso) --
 
 function updateWizardProductSelect() {
     const select = document.getElementById('wizard-product');
@@ -2564,10 +2486,10 @@ function getWeekOfMonthLabel(dateStr) {
     if (isNaN(d)) return 'Sin semana';
     const dayOfMonth = d.getDate();
     const firstDayOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
-    const firstDayOfWeek = firstDayOfMonth.getDay(); // 0 es Domingo, 1 es Lunes...
+    const firstDayOfWeek = firstDayOfMonth.getDay();
     const startOffset = (firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1);
     const weekOfMonth = Math.ceil((dayOfMonth + startOffset) / 7);
-    
+
     const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
     const monthName = monthNames[d.getMonth()];
     return `${monthName} - Semana ${weekOfMonth}`;
@@ -2576,8 +2498,7 @@ function getWeekOfMonthLabel(dateStr) {
 function getRelativeWeekLabel(dateStr) {
     const d = new Date(`${dateStr}T00:00:00`);
     if (isNaN(d)) return 'Sin semana';
-    
-    // Buscar la fecha de producción más antigua
+
     let minDate = d;
     productionHistory.forEach(hist => {
         const histDate = new Date(`${hist.startDate || hist.endDate}T00:00:00`);
@@ -2585,13 +2506,12 @@ function getRelativeWeekLabel(dateStr) {
             minDate = histDate;
         }
     });
-    
-    // Alinear la fecha mínima al lunes de esa semana
+
     const minDateAligned = new Date(minDate);
     const day = minDateAligned.getDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
     minDateAligned.setDate(minDateAligned.getDate() + diffToMonday);
-    
+
     const diffTime = d - minDateAligned;
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     const weekNumber = Math.floor(diffDays / 7) + 1;
@@ -2611,7 +2531,7 @@ function getWeekLabelForEntry(hist) {
         const d = new Date(`${hist.endDate || hist.startDate}T00:00:00`);
         const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
         const monthName = !isNaN(d) ? monthNames[d.getMonth()] : 'Mes';
-        
+
         if (weekCalculationMode === 'relative') {
             return `Semana ${hist.week}`;
         } else {
@@ -2802,10 +2722,10 @@ function updateWeeklyEditTankSelect() {
     if (!select) return;
     const dateInput = document.getElementById('weekly-edit-date').value;
     const checkDate = dateInput || getLocalDateStr();
-    
+
     const currentValue = select.value;
     select.innerHTML = '<option value="">-- Selecciona Tanque --</option>';
-    
+
     tanks.forEach(t => {
         const isOccupied = (t.schedule || []).some(s => checkDate >= s.start && checkDate <= s.end);
         const opt = document.createElement('option');
@@ -2827,7 +2747,7 @@ function weeklyWeekChanged() {
     if (!weekSelect || !dateInput) return;
     const weekVal = weekSelect.value;
     if (weekVal) {
-        const offset = parseInt(weekVal, 10) - 1; // 1 -> 0, 2 -> 1, etc.
+        const offset = parseInt(weekVal, 10) - 1;
         dateInput.value = getDateForWeekOffset(offset);
     }
     updateWeeklyEditTankSelect();
@@ -2849,7 +2769,6 @@ function resetWeeklyProductionForm() {
     }
     document.getElementById('weekly-edit-id')?.remove();
 
-    // Reset submit button text
     const submitBtn = document.getElementById('weekly-submit-btn');
     if (submitBtn) {
         submitBtn.textContent = 'Iniciar Producción Activa';
@@ -2882,12 +2801,9 @@ function editWeeklyProductionEntry(entryId) {
     document.getElementById('weekly-edit-liters').value = formatDecimal(entry.qtyLiters);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
 
-
-    // Load tank select
     updateWeeklyEditTankSelect();
     document.getElementById('weekly-edit-tank').value = entry.tankName || '';
 
-    // Load fermentation days
     let fermentationDays = entry.fermentationDays;
     if (fermentationDays === undefined) {
         if (entry.startDate && entry.endDate) {
@@ -2921,7 +2837,7 @@ function editWeeklyProductionEntry(entryId) {
 
 function deleteWeeklyProductionEntry(entryId) {
     if (!confirm('¿Eliminar este registro de producción? Esta acción no se puede deshacer.')) return;
-    
+
     // Si hay un lote activo asociado en algún tanque, eliminarlo también del tanque
     tanks.forEach(t => {
         t.schedule = (t.schedule || []).filter(s => s.id !== entryId);
@@ -2938,7 +2854,7 @@ function weeklyProductionCheckIngredients() {
     const qty = parseFloat(document.getElementById('weekly-edit-liters').value);
     const statusDiv = document.getElementById('weekly-mrp-status');
     if (!statusDiv) return false;
-    
+
     if (!prodId || isNaN(qty) || qty <= 0) {
         statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>';
         return false;
@@ -2964,7 +2880,7 @@ function weeklyProductionCheckIngredients() {
                 allAvailable = false;
                 missingItems.push({ raw, reqQty });
             }
-            
+
             html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'} flex items-start justify-between gap-2">
                 <span><i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
                 ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})</span>
@@ -2986,13 +2902,13 @@ function weeklyProductionCheckIngredients() {
         ` + html;
     }
     html += '</ul>';
-    
+
     if (allAvailable) {
         html = '<div class="text-green-700 font-bold mb-2"><i class="fas fa-check-circle"></i> Hay suficiente materia prima.</div>' + html;
     } else {
         html = '<div class="text-red-600 font-bold mb-2"><i class="fas fa-times-circle"></i> Faltan ingredientes. Compra materia prima antes de iniciar.</div>' + html;
     }
-    
+
     statusDiv.innerHTML = html;
     return allAvailable;
 }
@@ -3013,10 +2929,10 @@ function startWeeklyProductionActive() {
     const tankName = document.getElementById('weekly-edit-tank').value;
     const dateInput = document.getElementById('weekly-edit-date').value;
     const fermentationDays = parseInt(document.getElementById('weekly-edit-fermentation-days').value) || 8;
-    
+
     const fixedOrders = 0;
     const overflowBottles = 0;
-    
+
     const weekSelect = document.getElementById('weekly-edit-week').value;
     const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
 
@@ -3139,7 +3055,7 @@ function startWeeklyProductionActive() {
                 scheduleUpdated = true;
             }
         });
-        
+
         // Si el lote no estaba en el tanque por alguna razón, agregarlo
         if (!scheduleUpdated) {
             tank.schedule = tank.schedule || [];
@@ -3164,7 +3080,7 @@ function startWeeklyProductionActive() {
                 isActive: true
             };
         }
-        
+
         showNotification('Registro de producción y lote activo actualizados.', 'success');
     } else {
         // Agregar al tanque
@@ -3199,7 +3115,7 @@ function updateWizardTankSelect() {
     const select = document.getElementById('wizard-tank');
     if (!select) return;
     select.innerHTML = '<option value="">-- Selecciona Tanque Libre --</option>';
-    
+
     const todayStr = getLocalDateStr();
     tanks.forEach(t => {
         const isOccupied = (t.schedule || []).some(s => s.start <= todayStr);
@@ -3216,7 +3132,7 @@ function wizardCheckIngredients() {
     const prodId = parseInt(document.getElementById('wizard-product').value);
     const qty = parseFloat(document.getElementById('wizard-qty').value);
     const statusDiv = document.getElementById('wizard-mrp-status');
-    
+
     if (!prodId || isNaN(qty) || qty <= 0) {
         statusDiv.innerHTML = '<span class="text-gray-500">Selecciona un producto y cantidad válida para verificar MRP.</span>';
         return false;
@@ -3244,7 +3160,7 @@ function wizardCheckIngredients() {
                 allAvailable = false;
                 missingItems.push({ raw, reqQty });
             }
-            
+
             html += `<li class="${hasEnough ? 'text-green-700' : 'text-red-600 font-bold'} flex items-start justify-between gap-2">
                 <span><i class="fas ${hasEnough ? 'fa-check' : 'fa-times'} mr-1"></i>
                 ${raw.name}: Req. ${formatDecimal(reqQty)} (Stock: ${formatDecimal(raw.quantity)})</span>
@@ -3266,13 +3182,13 @@ function wizardCheckIngredients() {
         ` + html;
     }
     html += '</ul>';
-    
+
     if (allAvailable) {
         html = '<div class="text-green-700 font-bold mb-2"><i class="fas fa-check-circle"></i> Hay suficiente materia prima.</div>' + html;
     } else {
         html = '<div class="text-red-600 font-bold mb-2"><i class="fas fa-times-circle"></i> Faltan ingredientes. Compra materia prima antes de iniciar.</div>' + html;
     }
-    
+
     statusDiv.innerHTML = html;
     return allAvailable;
 }
@@ -3307,7 +3223,7 @@ function wizardStartProduction() {
     const prodId = parseInt(document.getElementById('wizard-product').value);
     const qty = parseFloat(document.getElementById('wizard-qty').value);
     const tankId = parseInt(document.getElementById('wizard-tank').value);
-    
+
     if (!prodId || isNaN(qty) || qty <= 0 || !tankId) {
         return showNotification('Por favor, completa todos los pasos correctamente.', 'error');
     }
@@ -3337,11 +3253,11 @@ function wizardStartProduction() {
     const packagingDays = 1;
     const endDate = new Date(today);
     endDate.setDate(today.getDate() + fermentationDays + bottlingDays + packagingDays);
-    
+
     const entryId = Date.now();
     const todayStr = getLocalDateStr(today);
     const endStr = getLocalDateStr(endDate);
-    
+
     tank.schedule = tank.schedule || [];
     tank.schedule.push({
         id: entryId,
@@ -3389,12 +3305,12 @@ function wizardStartProduction() {
 
     saveData();
     refreshAppUI();
-    
+
     // Reset Form and Switch Tab
     document.getElementById('wizard-product').value = '';
     document.getElementById('wizard-qty').value = '';
     document.getElementById('wizard-mrp-status').innerHTML = 'Selecciona un producto y cantidad para verificar disponibilidad de materia prima.';
-    
+
     switchProductionTab('seguimiento');
 }
 
@@ -3404,7 +3320,7 @@ function renderTrackingActive() {
     const container = document.getElementById('tracking-active-list');
     if (!container) return;
     container.innerHTML = '';
-    
+
     const todayStr = getLocalDateStr();
     let activeFound = false;
 
@@ -3412,17 +3328,17 @@ function renderTrackingActive() {
         (tank.schedule || []).forEach((schedule, scheduleIdx) => {
             activeFound = true;
             const prod = inventory.find(p => p.id === schedule.productId);
-            
+
             // Check status
             const isFuture = schedule.start > todayStr;
             const isOverdue = todayStr > schedule.end;
-            
+
             let statusBadge = '';
             let cardBg = '';
             let progress = 0;
             let elapsedDays = 0;
             let totalDays = 0;
-            
+
             if (isFuture) {
                 const daysToStart = diffDays(todayStr, schedule.start);
                 statusBadge = `<span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded border border-blue-300 flex items-center gap-1"><i class="fas fa-calendar-alt"></i> Programado (Inicia en ${daysToStart}d)</span>`;
@@ -3448,7 +3364,7 @@ function renderTrackingActive() {
 
             const div = document.createElement('div');
             div.className = `p-4 border rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 ${cardBg}`;
-            
+
             let leftCol = `
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-1">
@@ -3458,7 +3374,7 @@ function renderTrackingActive() {
                     <p class="text-sm font-semibold text-gray-700">Producto: <span class="text-black">${prod ? prod.name : 'Desc.'}</span> (${schedule.qty} L)</p>
                     <p class="text-xs text-gray-600">Desde: ${schedule.start} | Estimado Fin: ${schedule.end}</p>
             `;
-            
+
             if (!isFuture) {
                 leftCol += `
                     <div class="mt-2 text-xs font-bold text-gray-700 flex justify-between">
@@ -3471,14 +3387,14 @@ function renderTrackingActive() {
                 `;
             }
             leftCol += `</div>`;
-            
+
             let rightCol = `
                 <div class="flex-shrink-0">
                     <button onclick="finishProduction(${tank.id}, ${scheduleIdx})" ${isFuture ? 'disabled' : ''} class="px-4 py-2 bg-green-600 text-white font-bold rounded hover:bg-green-700 transition-colors shadow-md w-full md:w-auto ${isFuture ? 'opacity-50 cursor-not-allowed' : ''}"><i class="fas fa-flag-checkered mr-2"></i> Finalizar Ciclo</button>
                     <button onclick="deleteActiveProduction(${tank.id}, ${scheduleIdx})" class="px-4 py-2 mt-2 bg-red-100 text-red-600 font-bold rounded hover:bg-red-200 transition-colors shadow-sm text-xs w-full"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>
                 </div>
             `;
-            
+
             div.innerHTML = leftCol + rightCol;
             container.appendChild(div);
         });
@@ -3491,24 +3407,24 @@ function renderTrackingActive() {
 
 function finishProduction(tankId, scheduleIdx) {
     if (!confirm('¿Seguro que deseas finalizar esta producción? El volumen se sumará al inventario y el tanque quedará libre.')) return;
-    
+
     const tank = tanks.find(t => t.id === tankId);
     const schedule = tank.schedule[scheduleIdx];
-    
+
     // Agregar a Bodega 1 por defecto (si existe, si no, crearla)
     let defaultWarehouse = warehouses[0];
     if (!defaultWarehouse) {
         defaultWarehouse = { id: 1, name: 'Bodega Principal', location: 'Default' };
         warehouses.push(defaultWarehouse);
     }
-    
+
     // Calcular Lote y Unidades si es PT
     const product = inventory.find(p => p.id === schedule.productId);
     let qtyToAdd = schedule.qty;
     if (product && product.volumePerUnit) {
         qtyToAdd = Math.floor(schedule.qty / product.volumePerUnit); // Convertir Litros a Unidades
     }
-    
+
     // Crear batch (Lote) en inventario
     createBatch({
         productId: schedule.productId,
@@ -3517,7 +3433,7 @@ function finishProduction(tankId, scheduleIdx) {
         qty: qtyToAdd,
         manufactureDate: getLocalDateStr()
     });
-    
+
     // Actualizar el historial existente en lugar de duplicar
     const existingEntry = productionHistory.find(hist => hist.id === schedule.id);
     if (existingEntry) {
@@ -3537,10 +3453,10 @@ function finishProduction(tankId, scheduleIdx) {
             isActive: false
         });
     }
-    
+
     // Quitar del tanque
     tank.schedule.splice(scheduleIdx, 1);
-    
+
     saveData();
     refreshAppUI();
     showNotification('Producción finalizada. Tanque liberado e inventario actualizado.', 'success');
@@ -3550,12 +3466,12 @@ function deleteActiveProduction(tankId, scheduleIdx) {
     if (!confirm('ATENCIÓN: ¿Deseas CANCELAR esta producción? Se vaciará el tanque pero NO se recuperará la materia prima.')) return;
     const tank = tanks.find(t => t.id === tankId);
     const schedule = tank.schedule[scheduleIdx];
-    
+
     // Eliminar también del historial
     if (schedule.id) {
         productionHistory = productionHistory.filter(hist => hist.id !== schedule.id);
     }
-    
+
     tank.schedule.splice(scheduleIdx, 1);
     saveData();
     refreshAppUI();
@@ -3577,7 +3493,7 @@ function renderTrackingHistory() {
     const container = document.getElementById('tracking-history-list');
     if (!container) return;
     container.innerHTML = '';
-    
+
     if (!productionHistory || productionHistory.length === 0) {
         container.innerHTML = '<p class="text-gray-500 italic p-4 text-center border rounded">No hay historial de producciones terminadas.</p>';
         return;
