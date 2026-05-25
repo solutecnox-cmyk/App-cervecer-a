@@ -1131,7 +1131,7 @@ function saveRecipe(event) {
 }
 
 function loadRecipes() {
-    console.log('Recipes:', recipes);
+
     if (document.getElementById('recipe-list-modal') && !document.getElementById('recipe-list-modal').classList.contains('hidden')) {
         renderRecipeList();
     }
@@ -1412,6 +1412,45 @@ function runProductionFlow() {
 
     // (helper ya definido arriba)
 
+    // ─── LÓGICA DE NEGOCIO: Inventario Rodante + Producción Condicional ─────────
+    // Inventario inicial PT en litros (suma de todos los productos finales)
+    const initialInvLiters = finalProducts.reduce(
+        (sum, p) => sum + (p.quantity * (p.volumePerUnit || 0.33)), 0
+    );
+    // Demanda total semanal = pedidos fijos (L) + pronósticos (L)
+    const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
+
+    const weeklyInventoryInitial   = [0, 0, 0, 0];
+    const weeklyInventoryFinal     = [0, 0, 0, 0];
+    const weeklyForecastProduction = [0, 0, 0, 0]; // pronóstico condicional
+    const weeklyTotalProduction    = [0, 0, 0, 0]; // PedidosFijos + Overflow + Pronóstico
+    const weeklyBalance            = [0, 0, 0, 0];
+    const weeklyDeficit            = [false, false, false, false];
+
+    let rollingInv = initialInvLiters;
+    for (let w = 0; w < 4; w++) {
+        weeklyInventoryInitial[w] = rollingInv;
+        const produccionBase = weeklyBarrilDemand[w] + weeklyOverflowLiters[w];
+        const demanda = weeklyDemandTotal[w];
+
+        // =SI((ProduccionBase + InvInicial) >= Demanda; 0; Demanda - (ProduccionBase + InvInicial))
+        if ((produccionBase + rollingInv) >= demanda) {
+            weeklyForecastProduction[w] = 0;
+        } else {
+            weeklyForecastProduction[w] = Math.max(0, demanda - (produccionBase + rollingInv));
+        }
+
+        weeklyTotalProduction[w] = produccionBase + weeklyForecastProduction[w];
+        weeklyInventoryFinal[w]  = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
+        weeklyBalance[w]         = weeklyInventoryFinal[w] - rollingInv;
+        weeklyDeficit[w]         = demanda > (customWeeklyCapacities[w] || 720);
+        rollingInv = weeklyInventoryFinal[w];
+    }
+    // Sincronizar weeklyProducedLiters con la producción total planificada para MPS
+    for (let w = 0; w < 4; w++) {
+        weeklyProducedLiters[w] = weeklyTotalProduction[w];
+    }
+
     // 2. Calcular MPS (Plan Maestro de Producción)
     let totalLiters = 0;
     let totalBottlesGen = 0;
@@ -1621,22 +1660,38 @@ function runProductionFlow() {
     });
 
     if(kpiContainer) {
+        const totalPlanned      = weeklyTotalProduction.reduce((a,b)=>a+b,0);
+        const totalBarrilKpi    = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
+        const totalOverflowKpi  = weeklyOverflowLiters.reduce((a,b)=>a+b,0);
+        const totalForecastProd = weeklyForecastProduction.reduce((a,b)=>a+b,0);
+        const totalDemandMonth  = weeklyDemandTotal.reduce((a,b)=>a+b,0);
+        const monthlyCapKpi     = customWeeklyCapacities.reduce((a,b)=>a+b,0);
+        const pctBarril     = totalPlanned > 0 ? Math.round((totalBarrilKpi   / totalPlanned) * 100) : 0;
+        const pctOverflow   = totalPlanned > 0 ? Math.round((totalOverflowKpi / totalPlanned) * 100) : 0;
+        const pctForecast   = totalPlanned > 0 ? Math.round((totalForecastProd/ totalPlanned) * 100) : 0;
+        const pctCapacity   = monthlyCapKpi > 0 ? Math.round((totalPlanned / monthlyCapKpi) * 100) : 0;
+        const hasDeficit    = weeklyDeficit.some(d => d);
         kpiContainer.innerHTML = `
             <div class="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center shadow-sm">
-                <p class="text-sm text-green-800 font-bold mb-1">Litros Producidos / Mes</p>
-                <p class="text-3xl font-black text-green-600">${totalLiters} L</p>
+                <p class="text-xs text-green-800 font-bold mb-1">Producción Total Planificada</p>
+                <p class="text-2xl font-black text-green-600">${formatDecimal(totalPlanned)} L</p>
+                <p class="text-xs text-green-700 mt-1">Demanda: ${formatDecimal(totalDemandMonth)} L</p>
             </div>
-            <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
-                <p class="text-sm text-blue-800 font-bold mb-1">Uso de Capacidad (S1-S4)</p>
-                <p class="text-3xl font-black text-blue-600">${Math.round((lotesPorSemana.reduce((a, b) => a + b, 0) / (customWeeklyCapacities.reduce((a, b) => a + b, 0) / LITROS_POR_LOTE)) * 100)}%</p>
+            <div class="flex-1 ${pctCapacity > 100 ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'} p-4 rounded-lg border text-center shadow-sm">
+                <p class="text-xs ${pctCapacity > 100 ? 'text-red-800' : 'text-blue-800'} font-bold mb-1">% Uso de Capacidad</p>
+                <p class="text-2xl font-black ${pctCapacity > 100 ? 'text-red-600' : 'text-blue-600'}">${pctCapacity}%</p>
+                <p class="text-xs text-gray-500 mt-1">Cap: ${formatDecimal(monthlyCapKpi)} L / mes</p>
             </div>
             <div class="flex-1 bg-amber-50 p-4 rounded-lg border border-amber-200 text-center shadow-sm">
-                <p class="text-sm text-amber-800 font-bold mb-1">Overflow embotellado</p>
-                <p class="text-3xl font-black text-amber-600">${formatDecimal(weeklyOverflowBottles.reduce((a,b)=>a+b,0))} Bot / ${formatDecimal(weeklyOverflowLiters.reduce((a,b)=>a+b,0))} L</p>
+                <p class="text-xs text-amber-800 font-bold mb-1">Participación por Tipo</p>
+                <p class="text-xs text-gray-700 mt-2">🔵 Pedidos Fijos: <strong>${pctBarril}%</strong></p>
+                <p class="text-xs text-gray-700">🟠 Overflow: <strong>${pctOverflow}%</strong></p>
+                <p class="text-xs text-gray-700">🟢 Pronóstico: <strong>${pctForecast}%</strong></p>
             </div>
-            <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
-                <p class="text-sm text-purple-800 font-bold mb-1">Inv. Final PT Proyectado</p>
-                <p class="text-3xl font-black text-purple-600">${formatDecimal(finalInvTotal)} Bot / ${formatDecimal(finalInvLiters)} L</p>
+            <div class="flex-1 ${hasDeficit ? 'bg-red-50 border-red-300' : 'bg-purple-50 border-purple-200'} p-4 rounded-lg border text-center shadow-sm">
+                <p class="text-xs ${hasDeficit ? 'text-red-800' : 'text-purple-800'} font-bold mb-1">Inv. Final Proyectado (L)</p>
+                <p class="text-2xl font-black ${hasDeficit ? 'text-red-600' : 'text-purple-600'}">${formatDecimal(weeklyInventoryFinal[3])} L</p>
+                <p class="text-xs ${hasDeficit ? 'text-red-600 font-bold' : 'text-gray-500'} mt-1">${hasDeficit ? '⚠️ Déficit en alguna semana' : '✅ Sin déficit proyectado'}</p>
             </div>
         `;
     }
@@ -1647,73 +1702,78 @@ function runProductionFlow() {
     const inventoryTable = document.getElementById('production-inventory-table');
 
     if(volumeTable || weeklyVolumeTable) {
-        const monthlyCapacity = customWeeklyCapacities.reduce((a, b) => a + b, 0);
-        const barrilTotal = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
-        const overflowTotalBottles = weeklyOverflowBottles.reduce((a,b)=>a+b,0);
-        const overflowTotalLiters = weeklyOverflowLiters.reduce((a,b)=>a+b,0);
-        const forecastTotal = weeklyForecastLiters.reduce((a,b)=>a+b,0);
-        const producedTotal = weeklyProducedLiters.reduce((a,b)=>a+b,0);
+        const monthlyCapacity    = customWeeklyCapacities.reduce((a, b) => a + b, 0);
+        const barrilTotal        = weeklyBarrilDemand.reduce((a,b)=>a+b,0);
+        const overflowTotalLiters= weeklyOverflowLiters.reduce((a,b)=>a+b,0);
+        const forecastProdTotal  = weeklyForecastProduction.reduce((a,b)=>a+b,0);
+        const producedTotal      = weeklyTotalProduction.reduce((a,b)=>a+b,0);
 
         const tableHtml = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
-                <thead class="bg-[#005B3A] text-white">
+                <thead class="bg-[#1a1a2e] text-white">
                     <tr>
                         <th class="p-2 border">Concepto</th>
                         <th class="p-2 border text-center">Semana 1</th>
                         <th class="p-2 border text-center">Semana 2</th>
                         <th class="p-2 border text-center">Semana 3</th>
                         <th class="p-2 border text-center">Semana 4</th>
-                        <th class="p-2 border text-center">Total Mes</th>
+                        <th class="p-2 border text-center bg-[#005B3A]">Total Mes</th>
                         <th class="p-2 border text-center">%</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Pedidos fijos — Barril (L) <span class="text-[10px] text-gray-400 font-normal">(desde Prod. Semanal)</span></td>
+                        <td class="p-2 border font-semibold text-[13px]">🔵 Pedidos Fijos — Barril (L)</td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center font-medium">
-                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyBarrilDemand[w])} L</span>
+                            <td class="p-2 border text-center">
+                                <span class="font-semibold text-gray-800 text-sm">${formatDecimal(weeklyBarrilDemand[w])} L</span>
                             </td>
                         `).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)} L</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (monthlyCapacity || 1)) * 100)}%</td>
+                        <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(barrilTotal)} L</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((barrilTotal / (producedTotal || 1)) * 100)}%</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Overflow embotellado barril (bot) <span class="text-[10px] text-gray-400 font-normal">(desde Prod. Semanal)</span></td>
+                        <td class="p-2 border font-semibold text-[13px]">🟠 Overflow Embotellado (L)</td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center font-medium">
-                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyOverflowBottles[w])} Bot</span>
+                            <td class="p-2 border text-center">
+                                <span class="font-semibold text-gray-800 text-sm">${formatDecimal(weeklyOverflowLiters[w])} L</span>
                             </td>
                         `).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(overflowTotalBottles)} Bot</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (monthlyCapacity || 1)) * 100)}%</td>
+                        <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(overflowTotalLiters)} L</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((overflowTotalLiters / (producedTotal || 1)) * 100)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Producción según pronósticos (L) <span class="text-[10px] text-gray-400 font-normal">(desde Pronósticos)</span></td>
+                        <td class="p-2 border font-semibold text-[13px]">🟢 Producción según pronóstico (L) <span class="text-[10px] text-gray-400 font-normal block">Solo produce lo necesario</span></td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center font-medium">
-                                <span class="font-semibold text-gray-800">${formatDecimal(weeklyForecastLiters[w])} L</span>
+                            <td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'bg-blue-50' : 'bg-amber-50'}">
+                                <span class="font-semibold text-sm ${weeklyForecastProduction[w] === 0 ? 'text-blue-700' : 'text-amber-700'}">${formatDecimal(weeklyForecastProduction[w])} L</span>
+                                ${weeklyForecastProduction[w] === 0 ? '<span class="text-[9px] text-blue-500 block">Inv. cubre demanda</span>' : ''}
                             </td>
                         `).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)} L</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((forecastTotal / (monthlyCapacity || 1)) * 100)}%</td>
+                        <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(forecastProdTotal)} L</td>
+                        <td class="p-2 border text-center font-semibold">${Math.round((forecastProdTotal / (producedTotal || 1)) * 100)}%</td>
                     </tr>
-                    <tr class="font-bold bg-[#f8fafc]">
-                        <td class="p-2 border font-semibold">PRODUCCIÓN TOTAL (L)</td>
-                        ${weeklyProducedLiters.map(v => `<td class="p-2 border text-center font-semibold text-gray-800">${formatDecimal(v)} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(producedTotal)} L</td>
-                        <td class="p-2 border text-center font-semibold">${Math.round((producedTotal / (monthlyCapacity || 1)) * 100)}%</td>
+                    <tr class="bg-[#1a1a2e] text-white">
+                        <td class="p-2 border font-bold text-sm">⚡ PRODUCCIÓN TOTAL PLANIFICADA (L)</td>
+                        ${[0, 1, 2, 3].map(w => `
+                            <td class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">
+                                <span class="font-bold text-white">${formatDecimal(weeklyTotalProduction[w])} L</span>
+                                ${weeklyDeficit[w] ? '<span class="text-[9px] text-red-200 block">⚠️ Excede capacidad</span>' : ''}
+                            </td>
+                        `).join('')}
+                        <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(producedTotal)} L</td>
+                        <td class="p-2 border text-center font-bold">100%</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Capacidad producida en el mes (L)</td>
+                        <td class="p-2 border font-semibold text-[13px]">📊 Capacidad Disponible (L) <span class="text-[10px] text-green-600 font-normal">✏ clic para editar</span></td>
                         ${[0, 1, 2, 3].map(w => `
-                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors font-medium" title="Haz clic para editar la capacidad de esta semana" onclick="editWeeklyCapacity(${w})">
+                            <td class="p-2 border text-center cursor-pointer hover:bg-green-50 transition-colors ${weeklyDeficit[w] ? 'border-l-4 border-l-red-400' : ''}" onclick="editWeeklyCapacity(${w})">
                                 <span class="font-semibold text-gray-800">${customWeeklyCapacities[w]} L</span>
-                                <span class="text-[10px] text-green-700 block font-semibold hover:underline mt-0.5"><i class="fas fa-edit"></i> Editar</span>
+                                <span class="text-[9px] text-green-700 block"><i class="fas fa-edit"></i></span>
                             </td>
                         `).join('')}
                         <td class="p-2 border text-center font-bold">${monthlyCapacity} L</td>
-                        <td class="p-2 border text-center font-semibold">100%</td>
+                        <td class="p-2 border text-center font-semibold text-gray-500">—</td>
                     </tr>
                 </tbody>
             </table>
@@ -1766,72 +1826,66 @@ function runProductionFlow() {
     }
 
     if(inventoryTable) {
-        const startBottles = finalProducts.reduce((sum,p) => sum + p.quantity, 0);
-        const endBottles = finalProducts.reduce((sum,p) => sum + (invProjectedPT[p.id]?.[3] || 0), 0);
-        const startLiters = finalProducts.reduce((sum,p) => sum + (p.quantity * (p.volumePerUnit || 0.33)), 0);
-        const endLiters = finalProducts.reduce((sum,p) => sum + ((invProjectedPT[p.id]?.[3] || 0) * (p.volumePerUnit || 0.33)), 0);
+        const startLiters = initialInvLiters;
 
         inventoryTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
-                <thead class="bg-[#005B3A] text-white">
+                <thead class="bg-[#1a1a2e] text-white">
                     <tr>
                         <th class="p-2 border">Concepto</th>
-                        <th class="p-2 border text-center">Semana 0</th>
-                        <th class="p-2 border text-center">Semana 1</th>
-                        <th class="p-2 border text-center">Semana 2</th>
-                        <th class="p-2 border text-center">Semana 3</th>
-                        <th class="p-2 border text-center">Semana 4</th>
-                        <th class="p-2 border text-center">Total Mes</th>
+                        <th class="p-2 border text-center bg-gray-600">Inicial (S0)</th>
+                        ${[0,1,2,3].map(w => `<th class="p-2 border text-center ${weeklyDeficit[w] ? 'bg-red-700' : ''}">Semana ${w+1}${weeklyDeficit[w] ? ' ⚠️' : ''}</th>`).join('')}
+                        <th class="p-2 border text-center bg-[#005B3A]">Total / Final</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Pronóstico ventas (botellas)</td>
-                        <td class="p-2 border text-center">—</td>
-                        ${weeklyForecastBottles.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastBottles.reduce((a,b)=>a+b,0))}</td>
+                    <tr class="bg-blue-50">
+                        <td class="p-2 border font-semibold text-[13px]">📦 Inventario Inicial (L)</td>
+                        <td class="p-2 border text-center font-bold text-blue-700">${formatDecimal(startLiters)} L</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-blue-600 font-semibold">${formatDecimal(weeklyInventoryInitial[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center text-gray-400">—</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Pronóstico ventas (litros)</td>
-                        <td class="p-2 border text-center">—</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastLiters.reduce((a,b)=>a+b,0))}</td>
+                        <td class="p-2 border font-semibold text-[13px]">🔵 + Pedidos Fijos (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyBarrilDemand.reduce((a,b)=>a+b,0))} L</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Inventario PT (botellas) al INICIO</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(startBottles)}</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(startBottles)}</td>
+                        <td class="p-2 border font-semibold text-[13px]">🟠 + Overflow (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-gray-700">${formatDecimal(weeklyOverflowLiters[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyOverflowLiters.reduce((a,b)=>a+b,0))} L</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Inventario PT (botellas) al FINAL</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(endBottles)}</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(endBottles)}</td>
+                        <td class="p-2 border font-semibold text-[13px]">🟢 + Pronóstico (L) <span class="text-[9px] text-gray-400 font-normal block">Solo si hace falta</span></td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center ${weeklyForecastProduction[w] === 0 ? 'text-blue-500' : 'text-amber-600 font-semibold'}">${formatDecimal(weeklyForecastProduction[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold">${formatDecimal(weeklyForecastProduction.reduce((a,b)=>a+b,0))} L</td>
                     </tr>
-                    <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Inventario PT (litros) al INICIO</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(startLiters)}</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(startLiters)}</td>
+                    <tr class="bg-[#1a1a2e] text-white">
+                        <td class="p-2 border font-bold text-[13px]">⚡ = Producción Total (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-bold ${weeklyDeficit[w] ? 'bg-red-700' : 'bg-[#005B3A]'}">${formatDecimal(weeklyTotalProduction[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(weeklyTotalProduction.reduce((a,b)=>a+b,0))} L</td>
+                    </tr>
+                    <tr class="bg-red-50">
+                        <td class="p-2 border font-semibold text-[13px] text-red-800">🔴 − Demanda Total (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center text-red-700 font-semibold ${weeklyDeficit[w] ? 'bg-red-100 font-bold' : ''}">${formatDecimal(weeklyDemandTotal[w])} L${weeklyDeficit[w] ? ' ⚠️' : ''}</td>`).join('')}
+                        <td class="p-2 border text-center font-bold text-red-700">${formatDecimal(weeklyDemandTotal.reduce((a,b)=>a+b,0))} L</td>
+                    </tr>
+                    <tr class="bg-green-50">
+                        <td class="p-2 border font-bold text-[13px] text-green-800">📊 = Inventario Final (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-bold ${weeklyInventoryFinal[w] < 0 ? 'bg-red-100 text-red-700' : 'text-green-700'}">${formatDecimal(weeklyInventoryFinal[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center font-bold text-green-700">${formatDecimal(weeklyInventoryFinal[3])} L</td>
                     </tr>
                     <tr>
-                        <td class="p-2 border font-semibold">Inventario PT (litros) al FINAL</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center">—</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(endLiters)}</td>
-                        <td class="p-2 border text-center font-bold">${formatDecimal(endLiters)}</td>
+                        <td class="p-2 border font-semibold text-[13px] text-gray-600">⚖️ Balance Semanal (L)</td>
+                        <td class="p-2 border text-center text-gray-400">—</td>
+                        ${[0,1,2,3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyBalance[w] >= 0 ? 'text-green-600' : 'text-red-600'}">${weeklyBalance[w] >= 0 ? '+' : ''}${formatDecimal(weeklyBalance[w])} L</td>`).join('')}
+                        <td class="p-2 border text-center text-gray-400">—</td>
                     </tr>
                 </tbody>
             </table>
@@ -3376,9 +3430,11 @@ function renderTrackingActive() {
             } else {
                 const startDate = new Date(`${schedule.start}T00:00:00`);
                 const endDate = new Date(`${schedule.end}T00:00:00`);
-                const today = new Date();
+                // Normalizar "hoy" a medianoche local para evitar diferencias de horas
+                const todayMidnight = new Date();
+                todayMidnight.setHours(0, 0, 0, 0);
                 totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
-                elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
+                elapsedDays = Math.max(0, Math.floor((todayMidnight - startDate) / (1000 * 60 * 60 * 24)));
                 progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
 
                 if (isOverdue) {
