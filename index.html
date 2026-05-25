@@ -320,6 +320,25 @@
                             <span class="font-semibold">Botellas/Unidades:</span> Cantidad de unidades finales (botellas, cajas, etc). Si dejas este campo vacío, se calcula automáticamente dividiendo los litros entre el tamaño de unidad del producto.
                         </p>
                     </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                            <div>
+                                <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-chart-line mr-2"></i> Demanda semanal para planeación</h2>
+                                <p class="text-xs text-gray-500 mt-1">Pedidos fijos y pronóstico de ventas en litros (Semanas 1 a 4). Al guardar, se usan en las tablas MPS/MRP.</p>
+                            </div>
+                            <div class="flex gap-2 flex-wrap">
+                                <button type="button" onclick="importWeeklyDemandFromOrders()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 text-sm font-semibold">
+                                    <i class="fas fa-download mr-1"></i> Importar desde pedidos/pronósticos
+                                </button>
+                                <button type="button" onclick="saveWeeklyDemandAdjustment()" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] text-sm font-semibold shadow">
+                                    <i class="fas fa-save mr-1"></i> Guardar demanda semanal
+                                </button>
+                            </div>
+                        </div>
+                        <div id="weekly-demand-adjustment-table"></div>
+                    </div>
+
                     <div id="weekly-production-history-editor" class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto mb-6"></div>
                     <div class="grid grid-cols-1 gap-6 mb-6">
                         <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
@@ -360,6 +379,11 @@
                     
                     <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6" id="kpi-container">
                         <!-- KPIs -->
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mb-6 overflow-x-auto">
+                        <h3 class="text-lg font-bold mb-3 text-gray-700"><i class="fas fa-boxes text-[#005B3A] mr-2"></i> Inventario inicial (PT)</h3>
+                        <div id="production-initial-inventory-table"></div>
                     </div>
                     
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mb-6 overflow-x-auto">
