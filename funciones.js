@@ -1409,7 +1409,7 @@ function runProductionFlow() {
             weeklyBarrilDemand[wIdx] += hist.fixedOrders || 0;
             weeklyOverflowBottles[wIdx] += hist.overflowBottles || 0;
             const prod = inventory.find(p => p.id === hist.productId);
-            weeklyOverflowLiters[wIdx] += (hist.overflowBottles || 0) * getProductVolumePerUnit(prod);
+            weeklyOverflowLiters[wIdx] += (hist.overflowLiters !== undefined) ? hist.overflowLiters : ((hist.overflowBottles || 0) * getProductVolumePerUnit(prod));
         }
     });
 
@@ -1653,7 +1653,7 @@ function runProductionFlow() {
     // APLICAR FÓRMULA PARA OVERFLOW EN SEMANAS 3 Y 4
     // Fórmula: =SI(E52+F52<=720;0;SI((E52+F52-720)<480;480;720))
     const adjustedOverflowLiters = [...weeklyOverflowLiters];
-    
+
     for (let w = 2; w < 4; w++) { // Semanas 3 y 4 (índices 2 y 3)
         if (w === 2) {
             adjustedOverflowLiters[w] = 480;
@@ -1671,9 +1671,6 @@ function runProductionFlow() {
         const pctRow = (val) => Math.round((val / (producedTotal || 1)) * 100);
 
         const forecastCell = (w) => {
-            if (weeklyForecastCoversDemand[w]) {
-                return `<td class="p-2 border text-center text-blue-600 font-semibold" title="Inventario cubre la demanda">Inv. cubre demanda</td>`;
-            }
             return `<td class="p-2 border text-center">${formatDecimal(weeklyForecastProduction[w])} L</td>`;
         };
 
@@ -3107,13 +3104,13 @@ function getWeeklyLitersSplit() {
     let fixedLiters = parseFloat(document.getElementById('weekly-edit-fixed-liters')?.value) || 0;
     if (fixedLiters < 0) fixedLiters = 0;
     if (fixedLiters > totalLiters) fixedLiters = totalLiters;
-    
+
     // TODO se fermenta (totalLiters)
     // Los litros fijos son los que se asignan a pedidos firmes del inventario final
     // El resto va al pronóstico de ventas
     const forecastLiters = Math.max(0, totalLiters - fixedLiters);
-    
-    return { 
+
+    return {
         totalLiters,      // Lo que se fermenta
         fixedLiters,      // Lo que se asigna a pedidos fijos (sale del inventario final)
         fermentLiters: totalLiters,  // Lo que va al tanque (es todo)
@@ -3376,8 +3373,8 @@ function startWeeklyProductionActive() {
     const fixedOrders = fixedLiters;
     const forecastLitersValue = forecastLiters;
 
-    // Calcular overflow (litros sobrantes) - los litros que exceden la capacidad semanal
-    const overflowValue = Math.max(0, litersToFerment - DEFAULT_WEEKLY_CAPACITY_L);
+    // Calcular overflow (litros sobrantes) - los litros que exceden el pedido fijo
+    const overflowValue = Math.max(0, litersToFerment - fixedOrders);
 
     const weekSelect = document.getElementById('weekly-edit-week').value;
     const weekVal = weekSelect ? parseInt(weekSelect, 10) : null;
