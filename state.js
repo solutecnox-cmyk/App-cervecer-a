@@ -1,6 +1,28 @@
 // state.js
 // Inicializa el estado compartido y lo expone en `window._initialState`.
 const STORAGE_KEY = 'erpState';
+const VERSION_KEY = 'erpStateVersion';
+const CURRENT_VERSION = 'v4';
+
+try {
+    if (localStorage.getItem(VERSION_KEY) !== CURRENT_VERSION) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('clients');
+        localStorage.removeItem('suppliers');
+        localStorage.removeItem('inventory');
+        localStorage.removeItem('warehouses');
+        localStorage.removeItem('batches');
+        localStorage.removeItem('orders');
+        localStorage.removeItem('forecasts');
+        localStorage.removeItem('purchaseOrders');
+        localStorage.removeItem('productionHistory');
+        localStorage.removeItem('tanks');
+        localStorage.setItem(VERSION_KEY, CURRENT_VERSION);
+    }
+} catch (e) {
+    console.error('Failed to clear old localStorage', e);
+}
+
 const savedState = (() => {
     try {
         return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
@@ -22,10 +44,10 @@ const initial = {
     tanks: savedState.tanks || (() => { try { return JSON.parse(localStorage.getItem('tanks')) || []; } catch (e) { return []; } })(),
     weekCalculationMode: savedState.weekCalculationMode || 'default',
     customWeeklyCapacities: (savedState.customWeeklyCapacities && savedState.customWeeklyCapacities.length > 0) ? savedState.customWeeklyCapacities : [720, 720, 720, 720],
-    customWeeklyBarrilDemand: (savedState.customWeeklyBarrilDemand && savedState.customWeeklyBarrilDemand.length > 0) ? savedState.customWeeklyBarrilDemand : [600, 600, 0, 0],
-    customWeeklyForecastLiters: (savedState.customWeeklyForecastLiters && savedState.customWeeklyForecastLiters.length > 0) ? savedState.customWeeklyForecastLiters : [168, 168.3, 168.3, 168.63],
-    customWeeklyOverflowBottles: (savedState.customWeeklyOverflowBottles && savedState.customWeeklyOverflowBottles.length > 0) ? savedState.customWeeklyOverflowBottles : [363.63, 363.63, 0, 0],
-    customWeeklyOverflowLiters: (savedState.customWeeklyOverflowLiters && savedState.customWeeklyOverflowLiters.length > 0) ? savedState.customWeeklyOverflowLiters : [120, 120, 0, 0],
+    customWeeklyBarrilDemand: (savedState.customWeeklyBarrilDemand && savedState.customWeeklyBarrilDemand.length > 0) ? savedState.customWeeklyBarrilDemand : [0, 0, 0, 0],
+    customWeeklyForecastLiters: (savedState.customWeeklyForecastLiters && savedState.customWeeklyForecastLiters.length > 0) ? savedState.customWeeklyForecastLiters : [0, 0, 0, 0],
+    customWeeklyOverflowBottles: (savedState.customWeeklyOverflowBottles && savedState.customWeeklyOverflowBottles.length > 0) ? savedState.customWeeklyOverflowBottles : [0, 0, 0, 0],
+    customWeeklyOverflowLiters: (savedState.customWeeklyOverflowLiters && savedState.customWeeklyOverflowLiters.length > 0) ? savedState.customWeeklyOverflowLiters : [0, 0, 0, 0],
     weeklyDemandOverridesActive: savedState.weeklyDemandOverridesActive || false,
     recipes: savedState.recipes || [],
     systemParameters: savedState.systemParameters || {
