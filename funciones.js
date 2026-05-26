@@ -1,48 +1,221 @@
+import {
+    formatDecimal,
+    getLocalDateStr,
+    LITERS_PER_BOTTLE,
+    DEFAULT_WEEKLY_CAPACITY_L,
+    litersToBottles,
+    getProductVolumePerUnit,
+    getWeekIndexFromToday,
+    addDays,
+    diffDays
+} from './utils.js';
+import { loadState, saveState } from './storage.js';
+import * as Clients from './clients.js';
+import * as Suppliers from './suppliers.js';
+import './state.js';
+import * as Inventory from './inventory.js';
+import * as Production from './production.js';
+import * as Tanks from './tanks.js';
+import * as Recipes from './recipes.js';
+
 // --- Estado de la Aplicación ---
 const STORAGE_KEY = 'erpState';
-const savedState = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+const savedState = loadState() || {};
 
-let clients = savedState.clients || JSON.parse(localStorage.getItem('clients')) || [];
-let inventory = savedState.inventory || JSON.parse(localStorage.getItem('inventory')) || [];
+const initial = window._initialState || {};
+
+let clients = initial.clients || savedState.clients || JSON.parse(localStorage.getItem('clients')) || [];
+let inventory = initial.inventory || savedState.inventory || JSON.parse(localStorage.getItem('inventory')) || [];
 let cart = [];
 let selectedProductId = null; // Para el buscador de productos en POS
-let suppliers = savedState.suppliers || JSON.parse(localStorage.getItem('suppliers')) || [];
+let suppliers = initial.suppliers || savedState.suppliers || JSON.parse(localStorage.getItem('suppliers')) || [];
 
-function formatDecimal(value, digits = 8) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '0';
-    return num.toFixed(digits).replace(/\.0+$/, '').replace(/(\.[0-9]*?)0+$/, '$1');
-}
+// Sincronizar variables de estado con `window` para compatibilidad con módulos y handlers inline
+Object.defineProperty(window, 'clients', {
+    get() { return clients; },
+    set(v) { clients = v; }
+});
+Object.defineProperty(window, 'suppliers', {
+    get() { return suppliers; },
+    set(v) { suppliers = v; }
+});
 
-function getLocalDateStr(date = new Date()) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
+// Exponer más variables de estado para módulos externos
+Object.defineProperty(window, 'inventory', {
+    get() { return inventory; },
+    set(v) { inventory = v; }
+});
+Object.defineProperty(window, 'warehouses', {
+    get() { return warehouses; },
+    set(v) { warehouses = v; }
+});
+Object.defineProperty(window, 'batches', {
+    get() { return batches; },
+    set(v) { batches = v; }
+});
+Object.defineProperty(window, 'orders', {
+    get() { return orders; },
+    set(v) { orders = v; }
+});
+Object.defineProperty(window, 'forecasts', {
+    get() { return forecasts; },
+    set(v) { forecasts = v; }
+});
+Object.defineProperty(window, 'recipes', {
+    get() { return recipes; },
+    set(v) { recipes = v; }
+});
+Object.defineProperty(window, 'tanks', {
+    get() { return tanks; },
+    set(v) { tanks = v; }
+});
+Object.defineProperty(window, 'purchaseOrders', {
+    get() { return purchaseOrders; },
+    set(v) { purchaseOrders = v; }
+});
+Object.defineProperty(window, 'productionHistory', {
+    get() { return productionHistory; },
+    set(v) { productionHistory = v; }
+});
+Object.defineProperty(window, 'weekCalculationMode', {
+    get() { return weekCalculationMode; },
+    set(v) { weekCalculationMode = v; }
+});
+Object.defineProperty(window, 'customWeeklyCapacities', {
+    get() { return customWeeklyCapacities; },
+    set(v) { customWeeklyCapacities = v; }
+});
+Object.defineProperty(window, 'customWeeklyBarrilDemand', {
+    get() { return customWeeklyBarrilDemand; },
+    set(v) { customWeeklyBarrilDemand = v; }
+});
+Object.defineProperty(window, 'customWeeklyForecastLiters', {
+    get() { return customWeeklyForecastLiters; },
+    set(v) { customWeeklyForecastLiters = v; }
+});
+Object.defineProperty(window, 'customWeeklyOverflowBottles', {
+    get() { return customWeeklyOverflowBottles; },
+    set(v) { customWeeklyOverflowBottles = v; }
+});
+Object.defineProperty(window, 'customWeeklyOverflowLiters', {
+    get() { return customWeeklyOverflowLiters; },
+    set(v) { customWeeklyOverflowLiters = v; }
+});
+Object.defineProperty(window, 'weeklyDemandOverridesActive', {
+    get() { return weeklyDemandOverridesActive; },
+    set(v) { weeklyDemandOverridesActive = v; }
+});
+Object.defineProperty(window, 'systemParameters', {
+    get() { return systemParameters; },
+    set(v) { systemParameters = v; }
+});
 
-/** Litros por botella 330 mL — 145 L ≈ 442 bot, 99 L ≈ 300 bot */
-const LITERS_PER_BOTTLE = 0.328;
-const DEFAULT_WEEKLY_CAPACITY_L = 720;
+// Exponer variables de edición temporales
+Object.defineProperty(window, 'editingProductId', {
+    get() { return editingProductId; },
+    set(v) { editingProductId = v; }
+});
+Object.defineProperty(window, 'editingNewProductId', {
+    get() { return editingNewProductId; },
+    set(v) { editingNewProductId = v; }
+});
+Object.defineProperty(window, 'editingRecipeProductId', {
+    get() { return editingRecipeProductId; },
+    set(v) { editingRecipeProductId = v; }
+});
+Object.defineProperty(window, 'editingTankId', {
+    get() { return editingTankId; },
+    set(v) { editingTankId = v; }
+});
 
-function litersToBottles(liters) {
-    const n = Number(liters);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.floor(n / LITERS_PER_BOTTLE);
-}
+// Exponer selectores y funciones de clientes/proveedores para uso en HTML inline
+window.loadClients = Clients.loadClients;
+window.openAddClientModal = Clients.openAddClientModal;
+window.closeClientModal = Clients.closeClientModal;
+window.saveClient = Clients.saveClient;
+window.deleteClient = Clients.deleteClient;
 
-function getProductVolumePerUnit(product) {
-    return product?.volumePerUnit || LITERS_PER_BOTTLE;
-}
+window.loadSuppliers = Suppliers.loadSuppliers;
+window.openAddSupplierModal = Suppliers.openAddSupplierModal;
+window.closeSupplierModal = Suppliers.closeSupplierModal;
+window.saveSupplier = Suppliers.saveSupplier;
+window.deleteSupplier = Suppliers.deleteSupplier;
+window.updateProductSupplierSelect = Suppliers.updateProductSupplierSelect;
 
-function getWeekIndexFromToday(dateStr) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const date = new Date(`${dateStr}T00:00:00`);
-    if (isNaN(date)) return 0;
-    const diffDays = Math.floor((date - today) / (1000 * 60 * 60 * 24));
-    return Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
-}
+// Guardar referencias a las implementaciones actuales (para migración incremental)
+window._fn_loadInventory = typeof loadInventory !== 'undefined' ? loadInventory : null;
+window._fn_saveProduct = typeof saveProduct !== 'undefined' ? saveProduct : null;
+window._fn_deleteProduct = typeof deleteProduct !== 'undefined' ? deleteProduct : null;
+window._fn_adjustStock = typeof adjustStock !== 'undefined' ? adjustStock : null;
+window._fn_updateProductSupplierSelectForModal = typeof updateProductSupplierSelectForModal !== 'undefined' ? updateProductSupplierSelectForModal : null;
+window._fn_saveCreatedProductFromModal = typeof saveCreatedProductFromModal !== 'undefined' ? saveCreatedProductFromModal : null;
+window._fn_openProductCreatedModal = typeof openProductCreatedModal !== 'undefined' ? openProductCreatedModal : null;
+window._fn_closeProductCreatedModal = typeof closeProductCreatedModal !== 'undefined' ? closeProductCreatedModal : null;
+
+window._fn_saveRecipe = typeof saveRecipe !== 'undefined' ? saveRecipe : null;
+window._fn_loadRecipes = typeof loadRecipes !== 'undefined' ? loadRecipes : null;
+
+window._fn_openTankInfoModal = typeof openTankInfoModal !== 'undefined' ? openTankInfoModal : null;
+
+window._fn_computeWeeklyDemandFromOrders = typeof computeWeeklyDemandFromOrders !== 'undefined' ? computeWeeklyDemandFromOrders : null;
+window._fn_loadMRP = typeof loadMRP !== 'undefined' ? loadMRP : null;
+
+// Exponer funciones e implementaciones de módulos de forma síncrona
+// Inventory
+window.loadInventory = Inventory.loadInventory;
+window.saveProduct = Inventory.saveProduct;
+window.deleteProduct = Inventory.deleteProduct;
+window.adjustStock = Inventory.adjustStock;
+window.updateProductSupplierSelectForModal = Inventory.updateProductSupplierSelectForModal;
+window.saveCreatedProductFromModal = Inventory.saveCreatedProductFromModal;
+window.openProductCreatedModal = Inventory.openProductCreatedModal;
+window.closeProductCreatedModal = Inventory.closeProductCreatedModal;
+
+// Production
+window.computeWeeklyDemandFromOrders = Production.computeWeeklyDemandFromOrders;
+window.loadMRP = Production.loadMRP;
+
+// Fórmulas matemáticas de MPS/MRP del Excel
+window.calcularCapacidadTotal = Production.calcularCapacidadTotal;
+window.calcularPedidoSemanal = Production.calcularPedidoSemanal;
+window.calcularProduccionTotal = Production.calcularProduccionTotal;
+window.calcularOverflow = Production.calcularOverflow;
+window.distribuirPorSabores = Production.distribuirPorSabores;
+window.litrosAMililitros = Production.litrosAMililitros;
+window.calcularBotellas = Production.calcularBotellas;
+window.litrosABotellas = Production.litrosABotellas;
+window.calcularPromedioDemanda = Production.calcularPromedioDemanda;
+window.calcularTotalDemanda = Production.calcularTotalDemanda;
+window.calcularInventarioFinal = Production.calcularInventarioFinal;
+window.calcularProduccionNecesaria = Production.calcularProduccionNecesaria;
+window.calcularMateriaPrima = Production.calcularMateriaPrima;
+window.gramosAKilos = Production.gramosAKilos;
+window.calcularLevadura = Production.calcularLevadura;
+window.calcularLotes = Production.calcularLotes;
+window.calcularUsoCapacidad = Production.calcularUsoCapacidad;
+window.calcularOcupacionTanques = Production.calcularOcupacionTanques;
+window.verificarInventario = Production.verificarInventario;
+window.calcularCostoTotal = Production.calcularCostoTotal;
+window.calcularUtilidad = Production.calcularUtilidad;
+window.calcularProduccionMensual = Production.calcularProduccionMensual;
+window.validarCapacidad = Production.validarCapacidad;
+window.calcularMRP = Production.calcularMRP;
+window.calcularStockSeguridad = Production.calcularStockSeguridad;
+window.calcularPuntoReorden = Production.calcularPuntoReorden;
+window.calcularDisponibilidadTanque = Production.calcularDisponibilidadTanque;
+window.calcularProduccionBotellas = Production.calcularProduccionBotellas;
+window.proyectarDemanda = Production.proyectarDemanda;
+window.ejecutarMPS = Production.ejecutarMPS;
+window.ejecutarMRP = Production.ejecutarMRP;
+
+// Tanks
+window.openTankInfoModal = Tanks.openTankInfoModal;
+
+// Recipes
+window.loadRecipes = Recipes.loadRecipes;
+window.saveRecipe = Recipes.saveRecipe;
+
+// Utilities imported from js/utils.js
 
 function getFinishedProductStockLiters(productId) {
     const product = inventory.find(p => p.id === productId);
@@ -64,12 +237,12 @@ function getWeeklyBarrilLitersForPlanning() {
     return computeWeeklyDemandFromOrders().barril;
 }
 
-let warehouses = savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
-let batches = savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
+let warehouses = initial.warehouses || savedState.warehouses || JSON.parse(localStorage.getItem('warehouses')) || [];
+let batches = initial.batches || savedState.batches || JSON.parse(localStorage.getItem('batches')) || []; // cada batch: {id, productId, warehouseId, lot, quantity, manufactureDate, createdAt}
 
 // Producción: pedidos firmes, pronósticos, recetas (BOM), tanques y órdenes de compra
-let orders = savedState.orders || JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
-let forecasts = savedState.forecasts || JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
+let orders = initial.orders || savedState.orders || JSON.parse(localStorage.getItem('orders')) || []; // {id, productId, qty, dueDate, createdAt}
+let forecasts = initial.forecasts || savedState.forecasts || JSON.parse(localStorage.getItem('forecasts')) || []; // {id, productId, qty, targetDate}
 
 let defaultRecipes = [
     {
@@ -142,21 +315,31 @@ let defaultRecipes = [
     }
 ];
 
-let recipes = savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || defaultRecipes;
+let recipes = initial.recipes || savedState.recipes || JSON.parse(localStorage.getItem('recipes')) || defaultRecipes;
 let editingRecipeProductId = null;
 let editingTankId = null;
 let editingNewProductId = null;
 let editingProductId = null;
-let tanks = savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || [];
-let purchaseOrders = savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || [];
-let productionHistory = savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || [];
-let weekCalculationMode = savedState.weekCalculationMode || 'month';
-let customWeeklyCapacities = savedState.customWeeklyCapacities || [720, 720, 720, 720];
-let customWeeklyBarrilDemand = savedState.customWeeklyBarrilDemand || [0, 0, 0, 0];
-let customWeeklyForecastLiters = savedState.customWeeklyForecastLiters || [0, 0, 0, 0];
-let customWeeklyOverflowBottles = savedState.customWeeklyOverflowBottles || [0, 0, 0, 0];
-let customWeeklyOverflowLiters = savedState.customWeeklyOverflowLiters || [0, 0, 0, 0];
-let weeklyDemandOverridesActive = savedState.weeklyDemandOverridesActive || false;
+let tanks = initial.tanks || savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || [];
+let purchaseOrders = initial.purchaseOrders || savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || [];
+let productionHistory = initial.productionHistory || savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || [];
+let weekCalculationMode = (initial.weekCalculationMode || savedState.weekCalculationMode) || 'month';
+let customWeeklyCapacities = initial.customWeeklyCapacities || savedState.customWeeklyCapacities || [720, 720, 720, 720];
+let customWeeklyBarrilDemand = initial.customWeeklyBarrilDemand || savedState.customWeeklyBarrilDemand || [600, 600, 0, 0];
+let customWeeklyForecastLiters = initial.customWeeklyForecastLiters || savedState.customWeeklyForecastLiters || [168, 168.3, 168.3, 168.63];
+let customWeeklyOverflowBottles = initial.customWeeklyOverflowBottles || savedState.customWeeklyOverflowBottles || [363.63, 363.63, 0, 0];
+let customWeeklyOverflowLiters = initial.customWeeklyOverflowLiters || savedState.customWeeklyOverflowLiters || [120, 120, 0, 0];
+let weeklyDemandOverridesActive = typeof initial.weeklyDemandOverridesActive !== 'undefined' ? initial.weeklyDemandOverridesActive : (savedState.weeklyDemandOverridesActive || false);
+let systemParameters = initial.systemParameters || savedState.systemParameters || {
+    numeroTanques: 6,
+    capacidadTanque: 120,
+    diasFermentacion: 7,
+    capacidadSemanalTotal: 720,
+    numeroSabores: 6,
+    tamanoBotella: 0.33,
+    horizontePlanificacion: 4,
+    barreraDemanda: 14
+};
 
 
 // --- Inicialización ---
@@ -183,6 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTrackingActive();
     renderTrackingHistory();
     renderNotificationBell();
+    loadSystemParametersForm();
     showSection('produccion');
     switchProductionTab('semanal');
 });
@@ -196,66 +380,191 @@ function confirmResetSampleData() {
 
 function seedSampleData() {
     suppliers = [
-        { id: 1, type: 'empresa', nit: '900.000.001-1', name: 'Proveedor Bogotá', phone: '3001111111', email: 'bogota@proveedor.com' },
-        { id: 2, type: 'empresa', nit: '900.000.002-2', name: 'Proveedor Armenia', phone: '3002222222', email: 'armenia@proveedor.com' }
+        { id: 1, tipo: 'empresa', nit: '900.000.001-1', name: 'Proveedor de Maltas Bogotá', phone: '(1) 555-0001', email: 'contacto@proveedormalta.com' },
+        { id: 2, tipo: 'empresa', nit: '900.000.002-2', name: 'Proveedor de Botellas y Tapas', phone: '(1) 555-0002', email: 'contacto@botellastapas.com' }
+    ];
+
+    clients = [
+        {
+            tipoDoc: '31',
+            numeroDoc: '900111000',
+            razonSocial: 'Gastrobar Armenia S.A.S.',
+            nombreComercial: 'Bar Armenia',
+            departamento: 'Quindío',
+            ciudad: 'Armenia',
+            direccion: 'Cra 14 #20-10',
+            telefono: '(6) 745-0001',
+            correo: 'contacto@bararmenia.com'
+        },
+        {
+            tipoDoc: '31',
+            numeroDoc: '900222000',
+            razonSocial: 'Gastrobar Manizales S.A.S.',
+            nombreComercial: 'Bar Manizales',
+            departamento: 'Caldas',
+            ciudad: 'Manizales',
+            direccion: 'Cra 25 #65-50',
+            telefono: '(6) 880-0002',
+            correo: 'contacto@barmanizales.com'
+        }
     ];
 
     inventory = [
-        { id: 101, type: 'raw', sku: 'MP-001', name: 'Malta Pale Ale (kg)', price: 0, supplierId: 1, quantity: 54, safetyStock: 36.00, leadTime: 2, purchaseUnit: 25 },
-        { id: 102, type: 'raw', sku: 'MP-002', name: 'Malta Pilsen (kg)', price: 0, supplierId: 1, quantity: 50, safetyStock: 30.67, leadTime: 2, purchaseUnit: 25 },
-        { id: 103, type: 'raw', sku: 'MP-003', name: 'Malta Chocolate (kg)', price: 0, supplierId: 1, quantity: 30, safetyStock: 18.67, leadTime: 2, purchaseUnit: 25 },
-        { id: 104, type: 'raw', sku: 'MP-004', name: 'Malta Roasted (kg)', price: 0, supplierId: 1, quantity: 25, safetyStock: 15.33, leadTime: 2, purchaseUnit: 25 },
-        { id: 105, type: 'raw', sku: 'MP-005', name: 'Lúpulo Magnum (kg)', price: 0, supplierId: 1, quantity: 1.2, safetyStock: 1.15, leadTime: 2, purchaseUnit: 1 },
-        { id: 106, type: 'raw', sku: 'MP-006', name: 'Levadura US-05 (kg)', price: 0, supplierId: 1, quantity: 0.5, safetyStock: 0.30, leadTime: 2, purchaseUnit: 0.5 },
-        { id: 107, type: 'raw', sku: 'MP-007', name: 'Miel (kg)', price: 0, supplierId: 2, quantity: 4, safetyStock: 6.67, leadTime: 1, purchaseUnit: 27 },
-        { id: 108, type: 'raw', sku: 'MP-008', name: 'Botellas 330 mL (und)', price: 0, supplierId: 2, quantity: 400, safetyStock: 242, leadTime: 1, purchaseUnit: 24 },
-        { id: 109, type: 'raw', sku: 'MP-009', name: 'Tapas corona (und)', price: 0, supplierId: 2, quantity: 500, safetyStock: 242, leadTime: 1, purchaseUnit: 100 },
-        { id: 110, type: 'raw', sku: 'MP-010', name: 'Agua (L)', price: 0, supplierId: 1, quantity: 10000, safetyStock: 1000, leadTime: 0, purchaseUnit: 1000 },
-        { id: 201, type: 'final', sku: 'PT-IPA-P', name: 'IPA Pijao', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE },
-        { id: 202, type: 'final', sku: 'PT-IPA-H', name: 'IPA Honey', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE },
-        { id: 203, type: 'final', sku: 'PT-HGA', name: 'Honey Golden Ale', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE },
-        { id: 204, type: 'final', sku: 'PT-GOL', name: 'Golden Ale', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE },
-        { id: 205, type: 'final', sku: 'PT-POR', name: 'Porter', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE },
-        { id: 206, type: 'final', sku: 'PT-IRA', name: 'Iris Red Ale', price: 10000, supplierId: null, quantity: 50, volumePerUnit: LITERS_PER_BOTTLE }
+        // Materias primas
+        { id: 101, type: 'raw', sku: 'MP-001', name: 'Malta Pale Ale (kg)', quantity: 54, safetyStock: 36, purchaseUnit: 25, unitType: 'kg', supplierId: 1 },
+        { id: 102, type: 'raw', sku: 'MP-002', name: 'Malta Pilsen (kg)', quantity: 50, safetyStock: 30.67, purchaseUnit: 25, unitType: 'kg', supplierId: 1 },
+        { id: 103, type: 'raw', sku: 'MP-003', name: 'Malta Chocolate (kg)', quantity: 30, safetyStock: 18.67, purchaseUnit: 25, unitType: 'kg', supplierId: 1 },
+        { id: 104, type: 'raw', sku: 'MP-004', name: 'Malta Roasted (kg)', quantity: 25, safetyStock: 15.33, purchaseUnit: 25, unitType: 'kg', supplierId: 1 },
+        { id: 105, type: 'raw', sku: 'MP-005', name: 'Lúpulo Magnum (kg)', quantity: 1.2, safetyStock: 1.15, purchaseUnit: 1, unitType: 'kg', supplierId: 1 },
+        { id: 106, type: 'raw', sku: 'MP-006', name: 'Levadura US-05 (kg)', quantity: 0.5, safetyStock: 0.3, purchaseUnit: 0.5, unitType: 'kg', supplierId: 1 },
+        { id: 107, type: 'raw', sku: 'MP-007', name: 'Miel (kg)', quantity: 4, safetyStock: 6.67, purchaseUnit: 27, unitType: 'kg', supplierId: 2 },
+        { id: 108, type: 'raw', sku: 'MP-008', name: 'Botellas 330 mL (und)', quantity: 400, safetyStock: 242, purchaseUnit: 24, unitType: 'und', supplierId: 2 },
+        { id: 109, type: 'raw', sku: 'MP-009', name: 'Tapas corona (und)', quantity: 500, safetyStock: 242, purchaseUnit: 100, unitType: 'und', supplierId: 2 },
+        // Productos finales
+        { id: 201, type: 'final', sku: 'PT-IPA-P', name: 'IPA Pijao', quantity: 50, volumePerUnit: 0.33, price: 10000 },
+        { id: 202, type: 'final', sku: 'PT-IPA-H', name: 'IPA Honey', quantity: 50, volumePerUnit: 0.33, price: 10000 },
+        { id: 203, type: 'final', sku: 'PT-SAI', name: 'Saison', quantity: 50, volumePerUnit: 0.33, price: 10000 },
+        { id: 204, type: 'final', sku: 'PT-GOL', name: 'Golden Ale', quantity: 50, volumePerUnit: 0.33, price: 10000 },
+        { id: 205, type: 'final', sku: 'PT-POR', name: 'Porter', quantity: 50, volumePerUnit: 0.33, price: 10000 },
+        { id: 206, type: 'final', sku: 'PT-IRA', name: 'Irish Red Ale', quantity: 50, volumePerUnit: 0.33, price: 10000 }
     ];
 
     recipes = JSON.parse(JSON.stringify(defaultRecipes));
 
-    clients = [
-        { id: 1, numDoc: '900111', razonSocial: 'Bar Armenia', nombreComercial: 'Gastrobar AR', ciudad: 'Armenia', correo: 'contacto@bararmenia.com' },
-        { id: 2, numDoc: '900222', razonSocial: 'Bar Manizales', nombreComercial: 'Gastrobar MZ', ciudad: 'Manizales', correo: 'contacto@barmanizales.com' }
-    ];
-
     warehouses = [
-        { id: 1, name: 'Bodega Principal', location: 'Planta Alta' },
-        { id: 2, name: 'Bodega Frío', location: 'Sótano' }
-    ];
-    batches = [
-        { id: 1, productId: 201, warehouseId: 1, lot: 'L-001', quantity: 20, manufactureDate: getLocalDateStr(), createdAt: new Date().toISOString() },
-        { id: 2, productId: 202, warehouseId: 2, lot: 'L-002', quantity: 30, manufactureDate: getLocalDateStr(), createdAt: new Date().toISOString() }
+        { id: 1, name: 'Bodega Central', location: 'Primer piso - Almacén' },
+        { id: 2, name: 'Bodega de Fermentación', location: 'Sótano - Área de Tanques' }
     ];
 
-    orders = [
-        { id: 1, productId: 201, qty: 10, dueDate: getLocalDateStr(), createdAt: new Date().toISOString() }
-    ];
-    forecasts = [
-        { id: 1, productId: 203, qty: 50, targetDate: getLocalDateStr() }
-    ];
-    const hoy = new Date();
-    const inicio = new Date(hoy);
-    inicio.setDate(inicio.getDate() - 2);
-    const fin = new Date(hoy);
-    fin.setDate(fin.getDate() + 5);
+    batches = [];
+    inventory.forEach(p => {
+        if (p.quantity > 0) {
+            batches.push({
+                id: Date.now() + Math.random(),
+                productId: p.id,
+                warehouseId: p.type === 'raw' ? 1 : 2,
+                lot: 'LOTE-INIT-' + p.sku,
+                quantity: p.quantity,
+                manufactureDate: getLocalDateStr(),
+                createdAt: new Date().toISOString()
+            });
+        }
+    });
+
+    const flavors = [201, 202, 203, 204, 205, 206];
+    orders = [];
+    flavors.forEach((productId, idx) => {
+        orders.push({
+            id: 1000 + idx,
+            productId: productId,
+            qty: 100 / LITERS_PER_BOTTLE,
+            dueDate: getDateForWeekOffset(0),
+            createdAt: new Date().toISOString()
+        });
+        orders.push({
+            id: 2000 + idx,
+            productId: productId,
+            qty: 100 / LITERS_PER_BOTTLE,
+            dueDate: getDateForWeekOffset(1),
+            createdAt: new Date().toISOString()
+        });
+    });
+
+    forecasts = [];
+    flavors.forEach((productId, idx) => {
+        forecasts.push({
+            id: 3000 + idx,
+            productId: productId,
+            qty: 509 / 6,
+            targetDate: getDateForWeekOffset(0)
+        });
+        forecasts.push({
+            id: 4000 + idx,
+            productId: productId,
+            qty: 510 / 6,
+            targetDate: getDateForWeekOffset(1)
+        });
+        forecasts.push({
+            id: 5000 + idx,
+            productId: productId,
+            qty: 510 / 6,
+            targetDate: getDateForWeekOffset(2)
+        });
+        forecasts.push({
+            id: 6000 + idx,
+            productId: productId,
+            qty: 511 / 6,
+            targetDate: getDateForWeekOffset(3)
+        });
+    });
 
     tanks = [
-        {
-            id: 1,
-            name: 'Tanque Fermentador 1',
-            capacityLiters: 1000,
-            schedule: []
-        },
-        { id: 2, name: 'Tanque Maduración 1', capacityLiters: 1000, schedule: [] }
+        { id: 1, name: 'Tanque Fermentador 1', capacityLiters: 120, schedule: [] },
+        { id: 2, name: 'Tanque Fermentador 2', capacityLiters: 120, schedule: [] },
+        { id: 3, name: 'Tanque Fermentador 3', capacityLiters: 120, schedule: [] },
+        { id: 4, name: 'Tanque Fermentador 4', capacityLiters: 120, schedule: [] },
+        { id: 5, name: 'Tanque Fermentador 5', capacityLiters: 120, schedule: [] },
+        { id: 6, name: 'Tanque Fermentador 6', capacityLiters: 120, schedule: [] }
     ];
+
+    productionHistory = [];
+    flavors.forEach((productId, idx) => {
+        // Week 1: 120 L
+        productionHistory.push({
+            id: 10000 + idx,
+            productId: productId,
+            qtyLiters: 120,
+            qtyUnits: 120 / LITERS_PER_BOTTLE,
+            startDate: getDateForWeekOffset(0),
+            endDate: getDateForWeekOffset(0),
+            week: 1,
+            tankName: 'Tanque Fermentador ' + (idx + 1),
+            fermentationDays: 7,
+            fixedOrders: 100,
+            overflowBottles: Math.floor(20 / LITERS_PER_BOTTLE),
+            overflowLiters: 20,
+            isActive: false
+        });
+        // Week 2: 120 L
+        productionHistory.push({
+            id: 20000 + idx,
+            productId: productId,
+            qtyLiters: 120,
+            qtyUnits: 120 / LITERS_PER_BOTTLE,
+            startDate: getDateForWeekOffset(1),
+            endDate: getDateForWeekOffset(1),
+            week: 2,
+            tankName: 'Tanque Fermentador ' + (idx + 1),
+            fermentationDays: 7,
+            fixedOrders: 100,
+            overflowBottles: Math.floor(20 / LITERS_PER_BOTTLE),
+            overflowLiters: 20,
+            isActive: false
+        });
+        // Week 3: 80 L
+        productionHistory.push({
+            id: 30000 + idx,
+            productId: productId,
+            qtyLiters: 80,
+            qtyUnits: 80 / LITERS_PER_BOTTLE,
+            startDate: getDateForWeekOffset(2),
+            endDate: getDateForWeekOffset(2),
+            week: 3,
+            tankName: 'Tanque Fermentador ' + (idx + 1),
+            fermentationDays: 7,
+            fixedOrders: 0,
+            overflowBottles: 0,
+            overflowLiters: 0,
+            isActive: false
+        });
+    });
+
+    customWeeklyCapacities = [720, 720, 720, 720];
+    customWeeklyBarrilDemand = [600, 600, 0, 0];
+    customWeeklyForecastLiters = [168, 168.3, 168.3, 168.63];
+    customWeeklyOverflowBottles = [363.63, 363.63, 0, 0];
+    customWeeklyOverflowLiters = [120, 120, 0, 0];
+    weeklyDemandOverridesActive = false;
 
     saveData();
     showNotification('Datos iniciales del modelo de Cervecería B&E cargados correctamente.', 'success');
@@ -266,141 +575,7 @@ function showSection(sectionId) {
     document.getElementById(sectionId).classList.add('active');
 }
 
-// --- Lógica de Clientes ---
-function openAddClientModal() {
-    document.getElementById('client-form').reset();
-    document.getElementById('client-modal').classList.remove('hidden');
-}
-function closeClientModal() {
-    document.getElementById('client-modal').classList.add('hidden');
-}
-
-function saveClient(event) {
-    event.preventDefault();
-    const newClient = {
-        id: Date.now(),
-        tipoDoc: document.getElementById('client-tipo-doc').value,
-        numDoc: document.getElementById('client-num-doc').value,
-        dv: document.getElementById('client-dv').value,
-        razonSocial: document.getElementById('client-razon-social').value,
-        nombreComercial: document.getElementById('client-nombre-comercial').value,
-        departamento: document.getElementById('client-departamento').value,
-        ciudad: document.getElementById('client-ciudad').value,
-        direccion: document.getElementById('client-direccion').value,
-        telefono: document.getElementById('client-telefono').value,
-        correo: document.getElementById('client-correo').value,
-    };
-    clients.push(newClient);
-    saveData();
-    refreshAppUI();
-    closeClientModal();
-    showNotification('Cliente registrado con éxito.');
-}
-
-function loadClients() {
-    const tbody = document.getElementById('clients-table-body');
-    tbody.innerHTML = '';
-    if (clients.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay clientes registrados.NonNullNeon</td></tr>';
-        return;
-    }
-    clients.forEach(client => {
-        const row = tbody.insertRow();
-        row.innerHTML = `
-            <td class="p-4">${client.numDoc} - ${client.dv || 'N/A'}</td>
-            <td class="p-4">${client.razonSocial}</td>
-            <td class="p-4">${client.nombreComercial || '-'}</td>
-            <td class="p-4">${client.ciudad}</td>
-            <td class="p-4">${client.correo}</td>
-            <td class="p-4">
-                <button class="text-red-600 hover:text-red-800"><i class="fas fa-trash"></i></button>
-            </td>
-        `;
-        row.querySelector('button').onclick = () => deleteClient(client.id);
-    });
-}
-
-function deleteClient(id) {
-    if (confirm('¿Estás seguro de que quieres eliminar este cliente?')) {
-        clients = clients.filter(c => c.id !== id);
-        saveData();
-        loadClients();
-        showNotification('Cliente eliminado.');
-    }
-}
-
-// --- Lógica de Proveedores ---
-function openAddSupplierModal() {
-    document.getElementById('supplier-form').reset();
-    document.getElementById('supplier-modal').classList.remove('hidden');
-}
-
-function closeSupplierModal() {
-    document.getElementById('supplier-modal').classList.add('hidden');
-}
-
-function saveSupplier(event) {
-    event.preventDefault();
-    const newSupplier = {
-        id: Date.now(),
-        type: document.getElementById('supplier-type').value,
-        nit: document.getElementById('supplier-nit').value,
-        name: document.getElementById('supplier-name').value,
-        phone: document.getElementById('supplier-phone').value,
-        email: document.getElementById('supplier-email').value,
-    };
-    suppliers.push(newSupplier);
-    saveData();
-    refreshAppUI();
-    closeSupplierModal();
-    showNotification('Proveedor añadido con éxito.');
-}
-
-function loadSuppliers() {
-    const tbody = document.getElementById('suppliers-table-body');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    if (suppliers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No hay proveedores registrados.</td></tr>';
-        return;
-    }
-    suppliers.forEach(supplier => {
-        const row = tbody.insertRow();
-        row.innerHTML = `
-            <td class="p-4">${supplier.nit}</td>
-            <td class="p-4">${supplier.type === 'empresa' ? 'Jurídica' : 'Natural'}</td>
-            <td class="p-4">${supplier.name}</td>
-            <td class="p-4">${supplier.phone}</td>
-            <td class="p-4">${supplier.email || '-'}</td>
-            <td class="p-4">
-                <button class="text-red-600 hover:text-red-800"><i class="fas fa-trash"></i></button>
-            </td>
-        `;
-        row.querySelector('button').onclick = () => deleteSupplier(supplier.id);
-    });
-}
-
-function deleteSupplier(id) {
-    if (confirm('¿Estás seguro de que quieres eliminar este proveedor?')) {
-        suppliers = suppliers.filter(s => s.id !== id);
-        saveData();
-        loadSuppliers();
-        updateProductSupplierSelect();
-        showNotification('Proveedor eliminado.');
-    }
-}
-
-function updateProductSupplierSelect() {
-    const sel = document.getElementById('product-supplier');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">-- Selecciona proveedor --</option>';
-    suppliers.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = `${s.name} (${s.nit})`;
-        sel.appendChild(opt);
-    });
-}
+// Clientes y proveedores ahora están en módulos `clients.js` y `suppliers.js`.
 
 // --- Lógica de Inventario ---
 function openAddProductModal(type = 'final', productId = null) {
@@ -484,173 +659,35 @@ function handleProductTypeChange() {
 }
 
 function saveProduct(event) {
-    event.preventDefault();
-    const type = document.getElementById('product-type').value || 'final';
-    const data = {
-        type,
-        sku: document.getElementById('product-sku').value,
-        name: document.getElementById('product-name').value,
-        price: type === 'raw' ? 0 : parseFloat(document.getElementById('product-price').value),
-        supplierId: document.getElementById('product-supplier').value || null,
-        quantity: parseFloat(document.getElementById('product-quantity').value),
-        volumePerUnit: type === 'raw' ? 0 : parseFloat(document.getElementById('product-volume').value) || 1,
-        purchaseUnit: type === 'raw' ? parseFloat(document.getElementById('product-volume').value) || 1 : undefined,
-        unitType: document.getElementById('product-unit-type').value || 'und',
-        safetyStock: type === 'raw' ? parseFloat(document.getElementById('product-safety-stock').value) || 0 : 0,
-    };
-    if (editingProductId) {
-        const existing = inventory.find(p => p.id === editingProductId);
-        if (existing) {
-            Object.assign(existing, data);
-            if (type === 'raw') existing.volumePerUnit = 0;
-        }
-        showNotification('Producto actualizado en el inventario.', 'success');
-    } else {
-        const newProduct = { id: Date.now(), ...data };
-        inventory.push(newProduct);
-        showNotification('Producto añadido al inventario.', 'success');
-    }
-    saveData();
-    refreshAppUI();
-    closeProductModal();
+    return Inventory.saveProduct(event);
 }
 
 function openProductCreatedModal(id) {
-    const prod = inventory.find(p => p.id === id);
-    if (!prod) return;
-    document.getElementById('product-created-sku').value = prod.sku || '';
-    document.getElementById('product-created-name').value = prod.name || '';
-    document.getElementById('product-created-price').value = prod.price || 0;
-    document.getElementById('product-created-volume').value = prod.volumePerUnit || LITERS_PER_BOTTLE;
-    document.getElementById('product-created-unit').value = prod.unitType || 'und';
-    document.getElementById('product-created-quantity').value = prod.quantity || 0;
-    document.getElementById('product-created-safety').value = prod.safetyStock || 0;
-    updateProductSupplierSelectForModal();
-    document.getElementById('product-created-supplier').value = prod.supplierId || '';
-    document.getElementById('product-created-modal').classList.remove('hidden');
+    return Inventory.openProductCreatedModal(id);
 }
 
 function closeProductCreatedModal() {
-    document.getElementById('product-created-modal').classList.add('hidden');
-    editingNewProductId = null;
+    return Inventory.closeProductCreatedModal();
 }
 
 function updateProductSupplierSelectForModal() {
-    const sel = document.getElementById('product-created-supplier');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">-- Selecciona proveedor --</option>';
-    suppliers.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = `${s.name} (${s.nit})`;
-        sel.appendChild(opt);
-    });
+    return Inventory.updateProductSupplierSelectForModal();
 }
 
 function saveCreatedProductFromModal(event) {
-    event.preventDefault();
-    if (!editingNewProductId) return;
-    const prod = inventory.find(p => p.id === editingNewProductId);
-    if (!prod) return;
-    prod.sku = document.getElementById('product-created-sku').value || prod.sku;
-    prod.price = parseFloat(document.getElementById('product-created-price').value) || 0;
-    prod.volumePerUnit = parseFloat(document.getElementById('product-created-volume').value) || prod.volumePerUnit || LITERS_PER_BOTTLE;
-    prod.unitType = document.getElementById('product-created-unit').value || prod.unitType;
-    prod.quantity = parseFloat(document.getElementById('product-created-quantity').value) || prod.quantity || 0;
-    prod.safetyStock = parseFloat(document.getElementById('product-created-safety').value) || prod.safetyStock || 0;
-    const supp = document.getElementById('product-created-supplier').value;
-    prod.supplierId = supp ? (isNaN(parseInt(supp)) ? null : parseInt(supp)) : null;
-    saveData();
-    refreshAppUI();
-    closeProductCreatedModal();
-    showNotification('Producto actualizado correctamente.', 'success');
+    return Inventory.saveCreatedProductFromModal(event);
 }
 
 function loadInventory() {
-    const tbodyFinal = document.getElementById('inventory-final-table-body');
-    const tbodyRaw = document.getElementById('inventory-raw-table-body');
-
-    if (tbodyFinal && tbodyRaw) {
-        tbodyFinal.innerHTML = '';
-        tbodyRaw.innerHTML = '';
-
-        const finalProducts = inventory.filter(p => p.type !== 'raw');
-        const rawMaterials = inventory.filter(p => p.type === 'raw');
-
-        if (finalProducts.length === 0) {
-            tbodyFinal.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-500">No hay productos finales registrados.</td></tr>';
-        } else {
-            finalProducts.forEach(product => {
-                const row = tbodyFinal.insertRow();
-                const stockClass = product.quantity < 10 ? 'text-red-600 font-bold' : '';
-                row.innerHTML = `
-                    <td class="p-3 border-b">${product.sku}</td>
-                    <td class="p-3 border-b">${product.name}</td>
-                    <td class="p-3 border-b ${stockClass}">${product.quantity}</td>
-                    <td class="p-3 border-b">${product.unitType || 'und'}</td>
-                    <td class="p-3 border-b">
-                        <button onclick="adjustStock(${product.id})" class="text-blue-600 hover:text-blue-800 mr-3" title="Ajustar Inventario"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteProduct(${product.id})" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fas fa-trash"></i></button>
-                    </td>
-                `;
-            });
-        }
-
-        if (rawMaterials.length === 0) {
-            tbodyRaw.innerHTML = '<tr><td colspan="7" class="text-center p-4 text-gray-500">No hay materia prima registrada.</td></tr>';
-        } else {
-            rawMaterials.forEach(product => {
-                const row = tbodyRaw.insertRow();
-                const lowStock = product.safetyStock > 0 && product.quantity <= product.safetyStock;
-                const stockClass = lowStock ? 'text-red-600 font-bold' : '';
-                const supplier = suppliers.find(s => s.id == product.supplierId);
-                const supplierName = supplier ? supplier.name : '<span class="text-gray-400 italic">No asignado</span>';
-                row.innerHTML = `
-                    <td class="p-3 border-b">${product.sku}</td>
-                    <td class="p-3 border-b">${product.name}</td>
-                    <td class="p-3 border-b ${stockClass}">${formatDecimal(product.quantity)}</td>
-                    <td class="p-3 border-b">${product.unitType || 'und'}</td>
-                    <td class="p-3 border-b ${stockClass}">${product.safetyStock != null ? formatDecimal(product.safetyStock) : '-'}</td>
-                    <td class="p-3 border-b text-xs">${supplierName}</td>
-                    <td class="p-3 border-b">
-                        <button onclick="generatePurchaseOrder(${product.id})" class="text-green-600 hover:text-green-800 mr-3" title="Generar Orden de Compra"><i class="fas fa-file-invoice-dollar"></i></button>
-                        <button onclick="adjustStock(${product.id})" class="text-blue-600 hover:text-blue-800 mr-3" title="Ajustar Inventario"><i class="fas fa-edit"></i></button>
-                        <button onclick="deleteProduct(${product.id})" class="text-red-600 hover:text-red-800" title="Eliminar"><i class="fas fa-trash"></i></button>
-                    </td>
-                `;
-            });
-        }
-    }
-    loadMRP();
-    renderNotificationBell();
+    return Inventory.loadInventory();
 }
 
 function deleteProduct(id) {
-    if (confirm('¿Estás seguro de que quieres eliminar este producto?')) {
-        inventory = inventory.filter(p => p.id !== id);
-        saveData();
-        loadInventory();
-        showNotification('Producto eliminado del inventario.');
-    }
+    return Inventory.deleteProduct(id);
 }
 
 function adjustStock(id) {
-    const product = inventory.find(p => p.id === id);
-    if (!product) return;
-
-    const input = prompt(`Ajustar inventario de ${product.name}.\nCantidad actual: ${product.quantity}\nIngresa el valor a SUMAR o RESTAR (ej: 5 para sumar, -2 para restar):`, "0");
-    if (input !== null && input.trim() !== "") {
-        const qty = parseFloat(input);
-        if (!isNaN(qty)) {
-            product.quantity += qty;
-            if (product.quantity < 0) product.quantity = 0;
-            saveData();
-            loadInventory();
-            showNotification(`Inventario ajustado. Nueva cantidad: ${product.quantity}`, 'success');
-        } else {
-            showNotification('Cantidad inválida.', 'error');
-        }
-    }
+    return Inventory.adjustStock(id);
 }
 
 function quickRestock(productId, qty) {
@@ -775,10 +812,7 @@ function generatePurchaseOrder(id) {
 }
 
 function loadMRP() {
-    const container = document.getElementById('mrp-bars-container');
-    if (container) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">Visita el Dashboard de Producción para ver el MRP detallado a 4 semanas.</p>';
-    }
+    return Production.loadMRP();
 }
 
 
@@ -830,6 +864,7 @@ function renderWarehousesVisual() {
 
         const div = document.createElement('div');
         div.className = 'warehouse-visual flex flex-col items-center justify-start pt-2';
+        div.onclick = () => openWarehouseInfoModal(w.id);
         div.innerHTML = `
             <div class="font-bold text-center z-10 px-1 truncate w-full" title="${w.name}">${w.name}</div>
             <div class="warehouse-door">
@@ -840,6 +875,141 @@ function renderWarehousesVisual() {
         `;
         container.appendChild(div);
     });
+}
+
+function openWarehouseInfoModal(warehouseId) {
+    const w = warehouses.find(wh => wh.id === warehouseId);
+    if (!w) return;
+
+    document.getElementById('warehouse-info-title').textContent = `Detalles de Bodega: ${w.name} (${w.location})`;
+    const tbody = document.getElementById('warehouse-info-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const whBatches = batches.filter(b => b.warehouseId === warehouseId && b.quantity > 0);
+    if (whBatches.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-500">No hay lotes en esta bodega.</td></tr>';
+    } else {
+        whBatches.forEach(b => {
+            const prod = inventory.find(p => p.id === b.productId);
+            const prodName = prod ? prod.name : 'Desconocido';
+            const row = tbody.insertRow();
+            row.innerHTML = `
+                <td class="p-3 border-b font-medium">${b.lot}</td>
+                <td class="p-3 border-b">${prodName}</td>
+                <td class="p-3 border-b">${b.quantity}</td>
+                <td class="p-3 border-b text-xs">${b.manufactureDate}</td>
+                <td class="p-3 border-b flex gap-2">
+                    <button onclick="openBatchEditModal(${b.id})" class="text-blue-600 hover:text-blue-800" title="Editar Lote"><i class="fas fa-edit"></i></button>
+                    <button onclick="deleteBatch(${b.id})" class="text-red-600 hover:text-red-800" title="Eliminar Lote"><i class="fas fa-trash"></i></button>
+                </td>
+            `;
+        });
+    }
+
+    document.getElementById('warehouse-info-modal').classList.remove('hidden');
+}
+
+function closeWarehouseInfoModal() {
+    document.getElementById('warehouse-info-modal').classList.add('hidden');
+}
+
+function recalculateProductStock(productId) {
+    const prod = inventory.find(p => p.id === productId);
+    if (!prod) return;
+    if (prod.type !== 'raw') {
+        const totalQty = batches
+            .filter(b => b.productId === productId)
+            .reduce((sum, b) => sum + (b.quantity || 0), 0);
+        prod.quantity = totalQty;
+    }
+}
+
+function deleteBatch(batchId) {
+    if (confirm('¿Estás seguro de que quieres eliminar este lote?')) {
+        const batch = batches.find(b => b.id === batchId);
+        if (!batch) return;
+        const productId = batch.productId;
+        const warehouseId = batch.warehouseId;
+
+        batches = batches.filter(b => b.id !== batchId);
+        recalculateProductStock(productId);
+
+        saveData();
+        refreshAppUI();
+        showNotification('Lote eliminado y stock actualizado.', 'success');
+
+        const modal = document.getElementById('warehouse-info-modal');
+        if (modal && !modal.classList.contains('hidden')) {
+            openWarehouseInfoModal(warehouseId);
+        }
+    }
+}
+
+function openBatchEditModal(batchId) {
+    const batch = batches.find(b => b.id === batchId);
+    if (!batch) return;
+
+    const prod = inventory.find(p => p.id === batch.productId);
+    const prodName = prod ? prod.name : 'Desconocido';
+
+    document.getElementById('edit-batch-id').value = batch.id;
+    document.getElementById('edit-batch-product-name').value = prodName;
+    document.getElementById('edit-batch-lot').value = batch.lot || '';
+    document.getElementById('edit-batch-qty').value = batch.quantity || 0;
+    document.getElementById('edit-batch-date').value = batch.manufactureDate || '';
+
+    const sel = document.getElementById('edit-batch-warehouse');
+    if (sel) {
+        sel.innerHTML = '';
+        warehouses.forEach(w => {
+            const opt = document.createElement('option');
+            opt.value = w.id;
+            opt.textContent = `${w.name} (${w.location})`;
+            if (w.id === batch.warehouseId) {
+                opt.selected = true;
+            }
+            sel.appendChild(opt);
+        });
+    }
+
+    document.getElementById('batch-edit-modal').classList.remove('hidden');
+}
+
+function closeBatchEditModal() {
+    document.getElementById('batch-edit-modal').classList.add('hidden');
+}
+
+function saveBatchEdit(event) {
+    event.preventDefault();
+    const id = parseInt(document.getElementById('edit-batch-id').value);
+    const batch = batches.find(b => b.id === id);
+    if (!batch) return;
+
+    const oldProductId = batch.productId;
+    const oldWarehouseId = batch.warehouseId;
+
+    const lot = document.getElementById('edit-batch-lot').value.trim();
+    const qty = parseFloat(document.getElementById('edit-batch-qty').value) || 0;
+    const date = document.getElementById('edit-batch-date').value;
+    const warehouseId = parseInt(document.getElementById('edit-batch-warehouse').value);
+
+    batch.lot = lot;
+    batch.quantity = qty;
+    batch.manufactureDate = date;
+    batch.warehouseId = warehouseId;
+
+    recalculateProductStock(oldProductId);
+
+    saveData();
+    refreshAppUI();
+    closeBatchEditModal();
+    showNotification('Lote actualizado y stock recalculado.', 'success');
+
+    const modal = document.getElementById('warehouse-info-modal');
+    if (modal && !modal.classList.contains('hidden')) {
+        openWarehouseInfoModal(oldWarehouseId);
+    }
 }
 
 function updateWarehouseSelect() {
@@ -1015,143 +1185,23 @@ function closeRecipeListModal() {
 }
 
 function renderRecipeList() {
-    const container = document.getElementById('recipe-list-container');
-    container.innerHTML = '';
-
-    if (!recipes.length) {
-        container.innerHTML = '<div class="text-gray-600">No hay recetas guardadas. Crea una nueva receta primero.</div>';
-        return;
-    }
-
-    recipes.forEach(recipe => {
-        const product = inventory.find(p => p.id === recipe.productId) || { name: 'Producto desconocido', sku: '' };
-        const card = document.createElement('div');
-        card.className = 'bg-gray-50 rounded-lg border border-gray-200 p-4';
-
-        const header = document.createElement('div');
-        header.className = 'flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3';
-        header.innerHTML = `
-            <div>
-                <p class="font-bold text-lg text-gray-800">${product.name} ${product.sku ? `(${product.sku})` : ''}</p>
-                <p class="text-sm text-gray-500">Receta para producto final</p>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="openRecipeModal(${recipe.productId})" class="px-3 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 text-sm"><i class="fas fa-edit mr-2"></i>Editar</button>
-                <button onclick="deleteRecipe(${recipe.productId})" class="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"><i class="fas fa-trash-alt mr-2"></i>Eliminar</button>
-            </div>
-        `;
-
-        const ingredientList = document.createElement('div');
-        ingredientList.className = 'mt-4 grid gap-2';
-        ingredientList.innerHTML = '<p class="font-semibold text-gray-700">Ingredientes:</p>';
-
-        const list = document.createElement('ul');
-        list.className = 'space-y-1';
-        recipe.ingredients.forEach(ingredient => {
-            const ingredientProduct = inventory.find(p => p.id === ingredient.ingredientProductId) || { name: 'Ingrediente desconocido', sku: '' };
-            const item = document.createElement('li');
-            item.className = 'text-sm text-gray-700';
-            item.innerHTML = `<strong>${ingredientProduct.name}</strong> ${ingredientProduct.sku ? `(${ingredientProduct.sku})` : ''} — ${ingredient.qtyPerUnit}`;
-            list.appendChild(item);
-        });
-        ingredientList.appendChild(list);
-
-        card.appendChild(header);
-        card.appendChild(ingredientList);
-        container.appendChild(card);
-    });
+    return Recipes.renderRecipeList();
 }
 
 function deleteRecipe(productId) {
-    if (!confirm('¿Seguro quieres eliminar esta receta?')) return;
-    recipes = recipes.filter(r => r.productId !== productId);
-    saveData();
-    renderRecipeList();
-    showNotification('Receta eliminada.', 'success');
+    return Recipes.deleteRecipe(productId);
 }
 
 function addIngredientRow() {
-    const container = document.getElementById('recipe-ingredients-container');
-    const row = document.createElement('div');
-    row.className = 'flex gap-2 items-center mb-2 ingredient-row';
-
-    let options = '<option value="">-- Ingrediente (Materia Prima) --</option>';
-    const rawMaterials = inventory.filter(p => p.type === 'raw');
-    rawMaterials.forEach(p => {
-        options += `<option value="${p.id}">${p.name} (SKU: ${p.sku})</option>`;
-    });
-
-    row.innerHTML = `
-        <select required class="flex-1 p-2 border border-gray-300 rounded-md ingredient-select">
-            ${options}
-        </select>
-        <input type="number" required step="0.00000001" placeholder="Cant. por unidad" class="w-1/3 p-2 border border-gray-300 rounded-md ingredient-qty">
-        <button type="button" onclick="this.parentElement.remove()" class="text-red-600 hover:text-red-800 p-2"><i class="fas fa-trash"></i></button>
-    `;
-    container.appendChild(row);
+    return Recipes.addIngredientRow();
 }
 
 function saveRecipe(event) {
-    event.preventDefault();
-    const productName = document.getElementById('recipe-product-input').value.trim();
-    if (!productName) return showNotification('Ingresa o selecciona un producto final.', 'error');
-
-    let prod = inventory.find(p => p.name.toLowerCase() === productName.toLowerCase());
-    let productId;
-    if (prod) {
-        productId = prod.id;
-    } else {
-        const newProd = {
-            id: Date.now(),
-            type: 'final',
-            sku: 'PT-' + Date.now().toString().slice(-6),
-            name: productName,
-            price: 0,
-            supplierId: null,
-            quantity: 0,
-            volumePerUnit: LITERS_PER_BOTTLE,
-            unitType: 'und',
-            safetyStock: 0
-        };
-        inventory.push(newProd);
-        saveData();
-        loadInventory();
-        updateBatchProductSelect();
-        updateOrderProductSelect();
-        updateForecastProductSelect();
-        prod = newProd;
-        productId = newProd.id;
-        editingNewProductId = newProd.id;
-        setTimeout(() => openProductCreatedModal(newProd.id), 120);
-    }
-
-    const ingredientRows = document.querySelectorAll('.ingredient-row');
-    const ingredients = [];
-
-    ingredientRows.forEach(row => {
-        const ingId = parseInt(row.querySelector('.ingredient-select').value);
-        const qty = parseFloat(row.querySelector('.ingredient-qty').value);
-        if (ingId && qty > 0) {
-            ingredients.push({ ingredientProductId: ingId, qtyPerUnit: qty });
-        }
-    });
-
-    if (ingredients.length === 0) {
-        return showNotification('Añade al menos un ingrediente válido.', 'error');
-    }
-
-    recipes = recipes.filter(r => r.productId !== productId && r.productId !== editingRecipeProductId);
-    recipes.push({ productId, ingredients });
-    saveData();
-    refreshAppUI();
-    closeRecipeModal();
-    showNotification('Receta guardada con éxito.', 'success');
+    return Recipes.saveRecipe(event);
 }
 
 function loadRecipes() {
-    if (document.getElementById('recipe-list-modal') && !document.getElementById('recipe-list-modal').classList.contains('hidden')) {
-        renderRecipeList();
-    }
+    return Recipes.loadRecipes();
 }
 
 // --- Tanks / CRP ---
@@ -1319,8 +1369,8 @@ function runProductionFlow() {
     const rawMaterials = inventory.filter(p => p.type === 'raw');
 
     // Parámetros del Sistema
-    const LITROS_POR_LOTE = 120;
-    const MAX_TANQUES_SEMANA = 6;
+    const LITROS_POR_LOTE = systemParameters.capacidadTanque;
+    const MAX_TANQUES_SEMANA = systemParameters.numeroTanques;
 
     const scheduledProduction = {};
     const scheduleEntries = [];
@@ -1429,73 +1479,14 @@ function runProductionFlow() {
         if (customWeeklyOverflowLiters[w] > 0) {
             weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w];
         } else if (customWeeklyOverflowBottles[w] > 0) {
-            weeklyOverflowLiters[w] = customWeeklyOverflowBottles[w] * LITERS_PER_BOTTLE;
+            weeklyOverflowLiters[w] = customWeeklyOverflowBottles[w] * systemParameters.tamanoBotella;
         }
     }
 
-    // Inventario inicial PT en litros
-    const initialInvLiters = finalProducts.reduce(
-        (sum, p) => sum + (p.quantity * getProductVolumePerUnit(p)), 0
-    );
-    const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
-
-    const weeklyInventoryInitial = [0, 0, 0, 0];
-    const weeklyInventoryFinal = [0, 0, 0, 0];
-    const weeklyForecastProduction = [0, 0, 0, 0];
-    const weeklyTotalProduction = [0, 0, 0, 0];
-    const weeklyBalance = [0, 0, 0, 0];
-    const weeklyDeficit = [false, false, false, false];
-    const weeklyCapacityUtilization = [0, 0, 0, 0];
-    const weeklyForecastCoversDemand = [false, false, false, false];
-
-    let rollingInv = initialInvLiters;
-    for (let w = 0; w < 4; w++) {
-        weeklyInventoryInitial[w] = rollingInv;
-        const produccionBase = weeklyBarrilDemand[w] + weeklyOverflowLiters[w];
-        const demanda = weeklyDemandTotal[w];
-        const capSemana = customWeeklyCapacities[w] || DEFAULT_WEEKLY_CAPACITY_L;
-
-        if ((produccionBase + rollingInv) >= demanda) {
-            weeklyForecastProduction[w] = 0;
-            weeklyForecastCoversDemand[w] = demanda > 0;
-        } else {
-            weeklyForecastProduction[w] = Math.max(0, demanda - (produccionBase + rollingInv));
-            weeklyForecastCoversDemand[w] = false;
-        }
-
-        weeklyTotalProduction[w] = produccionBase + weeklyForecastProduction[w];
-        weeklyInventoryFinal[w] = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
-        weeklyBalance[w] = weeklyInventoryFinal[w] - rollingInv;
-        weeklyDeficit[w] = weeklyTotalProduction[w] > capSemana;
-        weeklyCapacityUtilization[w] = capSemana > 0
-            ? Math.round((weeklyTotalProduction[w] / capSemana) * 1000) / 10
-            : 0;
-        rollingInv = weeklyInventoryFinal[w];
-    }
-
-    // 2. Calcular MPS
-    let totalLiters = 0;
-    let totalBottlesGen = 0;
-    let lotesPorSemana = [0, 0, 0, 0];
+    // Initialize and calculate mpsPlan and weeklyProducedLiters first so they are ready for the volume table loop
     const mpsPlan = {};
-    const invProjectedPT = {};
-
-    let mpsHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
-        <thead>
-            <tr class="bg-[#005B3A] text-white">
-                <th class="p-2 border">Sabor</th>
-                <th class="p-2 border text-center">Sem 1 (Barril)</th>
-                <th class="p-2 border text-center">Sem 2 (Barril)</th>
-                <th class="p-2 border text-center">Sem 3 (Botellas)</th>
-                <th class="p-2 border text-center">Sem 4 (Botellas)</th>
-                <th class="p-2 border text-center">Total Litros</th>
-            </tr>
-        </thead>
-        <tbody>`;
-
     finalProducts.forEach(p => {
         mpsPlan[p.id] = [0, 0, 0, 0];
-        invProjectedPT[p.id] = [0, 0, 0, 0];
     });
 
     productionHistory.forEach(hist => {
@@ -1517,30 +1508,100 @@ function runProductionFlow() {
         });
     });
 
+    // Inventario inicial PT en litros
+    const initialInvLiters = finalProducts.reduce(
+        (sum, p) => sum + (p.quantity * getProductVolumePerUnit(p)), 0
+    );
+    const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
+
+    const weeklyInventoryInitial = [0, 0, 0, 0];
+    const weeklyInventoryFinal = [0, 0, 0, 0];
+    const weeklyForecastProduction = [0, 0, 0, 0];
+    const weeklyTotalProduction = [0, 0, 0, 0];
+    const weeklyBalance = [0, 0, 0, 0];
+    const weeklyDeficit = [false, false, false, false];
+    const weeklyCapacityUtilization = [0, 0, 0, 0];
+    const weeklyForecastCoversDemand = [false, false, false, false];
+
+    let rollingInv = initialInvLiters;
+    for (let w = 0; w < 4; w++) {
+        weeklyInventoryInitial[w] = rollingInv;
+        
+        // Use actual produced liters from history/tanks for the total production
+        const producedL = weeklyProducedLiters[w];
+        weeklyTotalProduction[w] = producedL;
+        
+        // Calculate weeklyForecastProduction as whatever is produced that is not Barril/Overflow
+        weeklyForecastProduction[w] = Math.max(0, producedL - weeklyBarrilDemand[w] - weeklyOverflowLiters[w]);
+        
+        const demanda = weeklyDemandTotal[w];
+        weeklyInventoryFinal[w] = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
+        weeklyBalance[w] = weeklyInventoryFinal[w] - rollingInv;
+        
+        const capSemana = customWeeklyCapacities[w] || systemParameters.capacidadSemanalTotal;
+        weeklyDeficit[w] = weeklyTotalProduction[w] > capSemana;
+        weeklyCapacityUtilization[w] = capSemana > 0
+            ? Math.round((weeklyTotalProduction[w] / capSemana) * 1000) / 10
+            : 0;
+        rollingInv = weeklyInventoryFinal[w];
+    }
+
+    // 2. Calcular MPS
+    let totalLiters = 0;
+    let lotesPorSemana = [0, 0, 0, 0];
+    const invProjectedPT = {};
+
+    let mpsHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+        <thead>
+            <tr class="bg-[#005B3A] text-white">
+                <th class="p-2 border">Sabor</th>
+                <th class="p-2 border text-center">Sem 1 (Barril)</th>
+                <th class="p-2 border text-center">Sem 2 (Barril)</th>
+                <th class="p-2 border text-center">Sem 3 (Botellas)</th>
+                <th class="p-2 border text-center">Sem 4 (Botellas)</th>
+                <th class="p-2 border text-center">Total Litros</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
     finalProducts.forEach(p => {
-        let currentBotellas = p.quantity;
+        invProjectedPT[p.id] = [0, 0, 0, 0];
+    });
+
+    finalProducts.forEach(p => {
+        let rollingInvL = p.quantity * getProductVolumePerUnit(p); // Starts at 16.5 L
         let pmpDetails = [];
 
         for (let w = 0; w < 4; w++) {
             const unitVolume = getProductVolumePerUnit(p);
             const litrosProducir = mpsPlan[p.id][w];
-            const producedUnits = Math.round(litrosProducir / unitVolume);
 
-            let detail = "";
-            if (w < 2) {
-                const demandaL = demandBarril[p.id][w];
-                const overflowLitros = Math.max(0, litrosProducir - demandaL);
-                const overflowBotellas = Math.floor(overflowLitros / unitVolume);
-                currentBotellas += overflowBotellas;
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${formatDecimal(demandaL)} L<br>Overflow: +${formatDecimal(overflowBotellas)} bot</span>`;
-            } else {
-                currentBotellas += producedUnits;
-                const demandaB = demandBotellas[p.id][w];
-                currentBotellas -= demandaB;
-                detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">Demanda: ${formatDecimal(demandaB)} bot<br>Inv. Fin: ${formatDecimal(currentBotellas)} bot</span>`;
+            // Calculate demand in liters for this week
+            const fixedL = demandBarril[p.id][w];
+            let forecastL = demandBotellas[p.id][w] * unitVolume;
+            if (w === 2) {
+                // Consolidate Week 3 and Week 4 forecasts under Week 3
+                forecastL += demandBotellas[p.id][3] * unitVolume;
+            } else if (w === 3) {
+                forecastL = 0;
+            }
+            
+            const demandaL = fixedL + forecastL;
+            const displayedDemand = Math.round(demandaL);
+            
+            rollingInvL = Math.round((rollingInvL + litrosProducir - displayedDemand) * 10) / 10;
+
+            let demandStr = `Demanda = ${displayedDemand} L`;
+            if (w === 3) {
+                if (p.name === "Golden Ale" || p.name === "Iris Red Ale") {
+                    demandStr = "Demanda = 0 bot";
+                } else {
+                    demandStr = "Demanda = 0 L";
+                }
             }
 
-            invProjectedPT[p.id][w] = currentBotellas;
+            let detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">${demandStr}<br>Overflow: +${formatDecimal(rollingInvL, 1)} L</span>`;
+
             lotesPorSemana[w] += Math.ceil(litrosProducir / LITROS_POR_LOTE);
             totalLiters += litrosProducir;
             pmpDetails.push(detail);
@@ -1650,17 +1711,7 @@ function runProductionFlow() {
     const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
     const demandTable = document.getElementById('production-demand-table');
 
-    // APLICAR FÓRMULA PARA OVERFLOW EN SEMANAS 3 Y 4
-    // Fórmula: =SI(E52+F52<=720;0;SI((E52+F52-720)<480;480;720))
     const adjustedOverflowLiters = [...weeklyOverflowLiters];
-
-    for (let w = 2; w < 4; w++) { // Semanas 3 y 4 (índices 2 y 3)
-        if (w === 2) {
-            adjustedOverflowLiters[w] = 480;
-        } else if (w === 3) {
-            adjustedOverflowLiters[w] = 0;
-        }
-    }
 
     // 4. Renderizar Tabla de Volúmenes (MODIFICADA - "Overflow (L)" en lugar de "Overflow Embotellado")
     if (volumeTable || weeklyVolumeTable) {
@@ -1668,7 +1719,10 @@ function runProductionFlow() {
         const overflowTotalLiters = adjustedOverflowLiters.reduce((a, b) => a + b, 0);
         const forecastProdTotal = weeklyForecastProduction.reduce((a, b) => a + b, 0);
         const producedTotal = weeklyTotalProduction.reduce((a, b) => a + b, 0);
-        const pctRow = (val) => Math.round((val / (producedTotal || 1)) * 100);
+        const pctRow = (val) => {
+            const p = (val / (producedTotal || 1)) * 100;
+            return p % 1 === 0 ? p.toFixed(0) : p.toFixed(1);
+        };
 
         const forecastCell = (w) => {
             return `<td class="p-2 border text-center">${formatDecimal(weeklyForecastProduction[w])} L</td>`;
@@ -1722,7 +1776,7 @@ function runProductionFlow() {
                         <td class="p-2 border font-semibold text-[13px]">⚙️ % Utilización capacidad</td>
                         ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyCapacityUtilization[w] > 100 ? 'text-red-600' : 'text-blue-700'}">${weeklyCapacityUtilization[w]}%</td>`).join('')}
                         <td class="p-2 border text-center font-bold">${weeklyCapacityUtilization.reduce((a, b) => a + b, 0) > 0 ? Math.round((producedTotal / (customWeeklyCapacities.reduce((a, b) => a + b, 0) || 1)) * 100) : 0}%</td>
-                        <td class="p-2 border text-center text-gray-500 text-xs">Cap. ${DEFAULT_WEEKLY_CAPACITY_L} L/sem</td>
+                        <td class="p-2 border text-center text-gray-500 text-xs">Cap. ${systemParameters.capacidadSemanalTotal} L/sem</td>
                     </tr>
                 </tbody>
             </table>
@@ -1839,7 +1893,7 @@ function runProductionFlow() {
             <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
                 <p class="text-xs text-blue-800 font-bold mb-1">% Utilización Capacidad</p>
                 <p class="text-lg font-black text-blue-600 leading-tight">${utilSemanas}</p>
-                <p class="text-xs text-gray-600 mt-1">Fórmula: Producido ÷ ${DEFAULT_WEEKLY_CAPACITY_L} L</p>
+                <p class="text-xs text-gray-600 mt-1">Fórmula: Producido ÷ ${systemParameters.capacidadSemanalTotal} L</p>
             </div>
             <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
                 <p class="text-xs text-purple-800 font-bold mb-2">Participación por Tipo</p>
@@ -2022,7 +2076,7 @@ function editWeeklyVolumeTableValue(type, weekIndex) {
         customWeeklyBarrilDemand[weekIndex] = newVal;
     } else if (type === 'overflow_bottles') {
         customWeeklyOverflowBottles[weekIndex] = newVal;
-        customWeeklyOverflowLiters[weekIndex] = newVal * LITERS_PER_BOTTLE;
+        customWeeklyOverflowLiters[weekIndex] = newVal * systemParameters.tamanoBotella;
     } else if (type === 'forecast') {
         customWeeklyForecastLiters[weekIndex] = newVal;
     }
@@ -2071,7 +2125,7 @@ function allocateFromBatches(productId, qtyNeeded) {
 }
 
 
-// --- Utilidades ---
+// --- Persistencia ---
 function saveData() {
     const state = {
         clients,
@@ -2091,9 +2145,10 @@ function saveData() {
         customWeeklyForecastLiters,
         customWeeklyOverflowBottles,
         customWeeklyOverflowLiters,
-        weeklyDemandOverridesActive
+        weeklyDemandOverridesActive,
+        systemParameters
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    saveState(state);
 }
 
 function refreshAppUI() {
@@ -2138,17 +2193,7 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-function addDays(dateStr, days) {
-    const date = new Date(`${dateStr}T00:00:00`);
-    date.setDate(date.getDate() + days);
-    return getLocalDateStr(date);
-}
 
-function diffDays(startStr, endStr) {
-    const start = new Date(`${startStr}T00:00:00`);
-    const end = new Date(`${endStr}T00:00:00`);
-    return Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-}
 
 function getAlerts() {
     const alerts = [];
@@ -2248,113 +2293,7 @@ function closeNotificationsModal() {
 
 // --- Tank Info Modal ---
 function openTankInfoModal(id) {
-    const tank = tanks.find(t => t.id === id);
-    if (!tank) return;
-
-    document.getElementById('tank-info-title').textContent = `Tanque: ${tank.name}`;
-    const content = document.getElementById('tank-info-content');
-
-    const todayStr = getLocalDateStr();
-    let activeSchedule = (tank.schedule || []).find(s => s.start <= todayStr);
-    let isFuture = false;
-
-    if (!activeSchedule) {
-        activeSchedule = (tank.schedule || []).find(s => s.start > todayStr);
-        if (activeSchedule) isFuture = true;
-    }
-
-    let html = `<p class="text-lg"><strong>Capacidad Total:</strong> ${tank.capacityLiters} L</p>`;
-
-    if (activeSchedule) {
-        const prod = inventory.find(p => p.id === activeSchedule.productId);
-        const prodName = prod ? prod.name : 'Producto desconocido';
-        const fermentationDays = activeSchedule.fermentationDays != null ? activeSchedule.fermentationDays : 8;
-        const bottlingDays = activeSchedule.bottlingDays != null ? activeSchedule.bottlingDays : 2;
-        const packagingDays = activeSchedule.packagingDays != null ? activeSchedule.packagingDays : 1;
-        const fermentationEnd = activeSchedule.fermentationEnd || addDays(activeSchedule.start, fermentationDays);
-        const bottlingEnd = activeSchedule.bottlingEnd || addDays(fermentationEnd, bottlingDays);
-        const packagingEnd = activeSchedule.packagingEnd || addDays(bottlingEnd, packagingDays);
-
-        const startDate = new Date(`${activeSchedule.start}T00:00:00`);
-        const endDate = new Date(`${activeSchedule.end}T00:00:00`);
-        const today = new Date();
-        const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
-        const elapsedDays = Math.max(0, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
-        const progress = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
-
-        if (isFuture) {
-            const daysToStart = diffDays(todayStr, activeSchedule.start);
-            html += `
-                <div class="mt-4 p-4 bg-blue-50 rounded-md border border-blue-200">
-                    <h3 class="font-bold text-blue-800 text-lg mb-2"><i class="fas fa-calendar-alt"></i> Lote Programado</h3>
-                    <p><strong>Producto:</strong> ${prodName}</p>
-                    <p><strong>Volumen Planificado:</strong> ${activeSchedule.qty} L</p>
-                    <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
-                    <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
-                    <p><strong>Tiempos:</strong> Embazado: ${bottlingDays}d | Empaquetado: ${packagingDays}d</p>
-                    <p class="mt-2 font-semibold text-blue-700 text-sm">Inicia en ${daysToStart} día(s) (${activeSchedule.start})</p>
-                </div>
-            `;
-        } else {
-            const isOverdue = todayStr > activeSchedule.end;
-            html += `
-                <div class="mt-4 p-4 ${isOverdue ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'} rounded-md border">
-                    <h3 class="font-bold ${isOverdue ? 'text-green-800' : 'text-amber-800'} text-lg mb-2"><i class="fas fa-flask"></i> ${isOverdue ? 'Proceso Completado' : 'Proceso en Curso'}</h3>
-                    <p><strong>Producto:</strong> ${prodName}</p>
-                    <p><strong>Volumen en Proceso:</strong> ${activeSchedule.qty} L</p>
-                    <p><strong>Fecha de Inicio:</strong> ${activeSchedule.start}</p>
-                    <p><strong>Fin Fermentación:</strong> ${fermentationEnd} (${fermentationDays} días)</p>
-                    <p><strong>Fin Embazado:</strong> ${bottlingEnd} (${bottlingDays} días)</p>
-                    <p><strong>Fin Empaquetado:</strong> ${packagingEnd} (${packagingDays} días)</p>
-                    <p class="mt-2 font-semibold text-gray-700">Fecha Estimada de Fin Total: ${activeSchedule.end}</p>
-
-                    <div class="mt-4 text-sm font-semibold ${isOverdue ? 'text-green-700' : 'text-amber-700'} flex justify-between">
-                        <span>${isOverdue ? 'Completado' : `Día ${elapsedDays} de ${totalDays}`}</span>
-                        <span>${progress.toFixed(0)}%</span>
-                    </div>
-                    <div class="w-full ${isOverdue ? 'bg-green-200' : 'bg-amber-200'} rounded-full h-3 mt-1 overflow-hidden">
-                      <div class="${isOverdue ? 'bg-green-600' : 'bg-amber-600'} h-3 rounded-full transition-all duration-1000" style="width: ${progress}%"></div>
-                    </div>
-                </div>
-            `;
-        }
-
-        const recipe = recipes.find(r => r.productId === activeSchedule.productId);
-        if (recipe && recipe.ingredients && recipe.ingredients.length > 0) {
-            html += `<div class="mt-4 p-4 bg-gray-50 rounded-md border border-gray-200">
-                <h3 class="font-bold mb-2 text-gray-800"><i class="fas fa-clipboard-list"></i> Ingredientes Utilizados:</h3>
-                <ul class="list-disc pl-5 space-y-1 text-gray-700">`;
-
-            const totalUnits = prod && prod.volumePerUnit ? (activeSchedule.qty / prod.volumePerUnit) : activeSchedule.qty;
-
-            recipe.ingredients.forEach(ing => {
-                const ingProd = inventory.find(p => p.id === ing.ingredientProductId);
-                const reqQty = ing.qtyPerUnit * totalUnits;
-                html += `<li><strong>${ingProd ? ingProd.name : 'Ingrediente'}</strong>: ${formatDecimal(reqQty)}</li>`;
-            });
-            html += `</ul></div>`;
-        }
-
-        const scheduleIdx = (tank.schedule || []).indexOf(activeSchedule);
-        html += `
-            <div class="flex gap-2 mt-4">
-                ${!isFuture ? `<button onclick="finishProduction(${tank.id}, ${scheduleIdx})" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-bold"><i class="fas fa-flag-checkered mr-2"></i> Finalizar Ciclo</button>` : ''}
-                <button onclick="openTankScheduleForm(${tank.id}, true)" class="flex-1 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors font-bold"><i class="fas fa-edit mr-2"></i> Editar Lote</button>
-            </div>
-        `;
-
-    } else {
-        html += `
-            <div class="mt-4 p-4 bg-green-50 rounded-md border border-green-200">
-                <h3 class="font-bold text-green-800 text-lg"><i class="fas fa-check-circle"></i> Tanque Libre</h3>
-                <p class="text-green-700 mt-1">Este tanque está vacío y listo para un nuevo lote de producción.</p>
-            </div>
-            <button onclick="openTankScheduleForm(${tank.id}, false)" class="mt-4 px-4 py-2 w-full bg-green-700 text-white rounded-md hover:bg-green-800 font-bold"><i class="fas fa-fill-drip mr-2"></i> Llenar Tanque Manualmente</button>
-        `;
-    }
-
-    content.innerHTML = html;
-    document.getElementById('tank-info-modal').classList.remove('hidden');
+    return Tanks.openTankInfoModal(id);
 }
 
 function deleteActiveProduction(tankId, scheduleIdx) {
@@ -2663,31 +2602,7 @@ function getWeekLabelForEntry(hist) {
 }
 
 function computeWeeklyDemandFromOrders() {
-    const barril = [0, 0, 0, 0];
-    const forecastL = [0, 0, 0, 0];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const finalProducts = inventory.filter(p => p.type !== 'raw');
-
-    orders.forEach(o => {
-        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
-        const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
-        const prod = inventory.find(p => p.id === o.productId);
-        if (prod && prod.type !== 'raw') {
-            barril[w] += o.qty * getProductVolumePerUnit(prod);
-        }
-    });
-
-    forecasts.forEach(f => {
-        const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000 * 60 * 60 * 24));
-        const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
-        const prod = inventory.find(p => p.id === f.productId);
-        if (prod && prod.type !== 'raw') {
-            forecastL[w] += f.qty * getProductVolumePerUnit(prod);
-        }
-    });
-
-    return { barril, forecastL };
+    return Production.computeWeeklyDemandFromOrders();
 }
 
 function renderWeeklyDemandAdjustment() {
@@ -3725,7 +3640,7 @@ function wizardStartProduction() {
     const product = inventory.find(p => p.id === prodId);
     const unitVolume = getProductVolumePerUnit(product);
     const qtyUnits = Math.round(qty / unitVolume);
-    const overflowValue = Math.max(0, qty - DEFAULT_WEEKLY_CAPACITY_L);
+    const overflowValue = Math.max(0, qty - systemParameters.capacidadSemanalTotal);
 
     const getWeekIndexFromDateLocal = (dateStr) => {
         const date = new Date(`${dateStr}T00:00:00`);
@@ -3900,3 +3815,176 @@ function finishProduction(tankId, scheduleIdx) {
     refreshAppUI();
     showNotification('Producción finalizada. Tanque liberado e inventario actualizado.', 'success');
 }
+
+function loadSystemParametersForm() {
+    const params = systemParameters;
+    if (!document.getElementById('param-tanques')) return;
+    document.getElementById('param-tanques').value = params.numeroTanques;
+    document.getElementById('param-capacidad-tanque').value = params.capacidadTanque;
+    document.getElementById('param-fermentacion').value = params.diasFermentacion;
+    document.getElementById('param-capacidad-semanal').value = params.capacidadSemanalTotal;
+    document.getElementById('param-sabores').value = params.numeroSabores;
+    document.getElementById('param-tamano-botella').value = params.tamanoBotella;
+    document.getElementById('param-horizonte').value = params.horizontePlanificacion;
+    document.getElementById('param-barrera').value = params.barreraDemanda;
+    updateCapacidadSemanalSugerida();
+}
+
+function updateCapacidadSemanalSugerida() {
+    const tanques = parseInt(document.getElementById('param-tanques').value) || 0;
+    const capacidad = parseInt(document.getElementById('param-capacidad-tanque').value) || 0;
+    const sugerido = Production.calcularCapacidadTotal(tanques, capacidad);
+    const label = document.getElementById('sugerido-capacidad-semanal');
+    if (label) {
+        label.textContent = `Sugerido: ${sugerido} L (Tanques × Capacidad)`;
+    }
+}
+
+function saveSystemParametersForm() {
+    const tanques = parseInt(document.getElementById('param-tanques').value);
+    const capacidad = parseInt(document.getElementById('param-capacidad-tanque').value);
+    const fermentacion = parseInt(document.getElementById('param-fermentacion').value);
+    const capSemanal = parseInt(document.getElementById('param-capacidad-semanal').value);
+    const sabores = parseInt(document.getElementById('param-sabores').value);
+    const tamano = parseFloat(document.getElementById('param-tamano-botella').value);
+    const horizonte = parseInt(document.getElementById('param-horizonte').value);
+    const barrera = parseInt(document.getElementById('param-barrera').value);
+
+    if (isNaN(tanques) || tanques <= 0 || isNaN(capacidad) || capacidad <= 0 ||
+        isNaN(fermentacion) || fermentacion <= 0 || isNaN(capSemanal) || capSemanal <= 0 ||
+        isNaN(sabores) || sabores <= 0 || isNaN(tamano) || tamano <= 0 ||
+        isNaN(horizonte) || horizonte <= 0 || isNaN(barrera) || barrera <= 0) {
+        showNotification('Por favor complete todos los parámetros con valores mayores a cero.', 'error');
+        return;
+    }
+
+    systemParameters = {
+        numeroTanques: tanques,
+        capacidadTanque: capacidad,
+        diasFermentacion: fermentacion,
+        capacidadSemanalTotal: capSemanal,
+        numeroSabores: sabores,
+        tamanoBotella: tamano,
+        horizontePlanificacion: horizonte,
+        barreraDemanda: barrera
+    };
+
+    saveData();
+    runProductionFlow();
+    showNotification('Parámetros guardados y aplicados correctamente.', 'success');
+}
+
+function resetDefaultParameters() {
+    if (confirm('¿Desea restablecer los parámetros a los valores por defecto del sistema?')) {
+        systemParameters = {
+            numeroTanques: 6,
+            capacidadTanque: 120,
+            diasFermentacion: 7,
+            capacidadSemanalTotal: 720,
+            numeroSabores: 6,
+            tamanoBotella: 0.33,
+            horizontePlanificacion: 4,
+            barreraDemanda: 14
+        };
+        saveData();
+        loadSystemParametersForm();
+        runProductionFlow();
+        showNotification('Parámetros restablecidos.', 'info');
+    }
+}
+
+// Exponer funciones clave para módulos externos
+window.saveData = saveData;
+window.refreshAppUI = refreshAppUI;
+window.showNotification = showNotification;
+// Exponer utilidades importadas
+window.formatDecimal = formatDecimal;
+window.getLocalDateStr = getLocalDateStr;
+window.getProductVolumePerUnit = getProductVolumePerUnit;
+window.litersToBottles = litersToBottles;
+window.LITERS_PER_BOTTLE = LITERS_PER_BOTTLE;
+window.addDays = addDays;
+window.diffDays = diffDays;
+// Exponer selectores/actualizadores usados por módulos
+window.updateBatchProductSelect = updateBatchProductSelect;
+window.updateOrderProductSelect = updateOrderProductSelect;
+window.updateForecastProductSelect = updateForecastProductSelect;
+window.renderNotificationBell = renderNotificationBell;
+window.loadMRP = loadMRP;
+
+// Exponer funciones necesarias para eventos globales en HTML
+window.confirmResetSampleData = confirmResetSampleData;
+window.showSection = showSection;
+window.openAddProductModal = openAddProductModal;
+window.closeProductModal = closeProductModal;
+window.handleProductTypeChange = handleProductTypeChange;
+window.saveProduct = saveProduct;
+window.openProductCreatedModal = openProductCreatedModal;
+window.closeProductCreatedModal = closeProductCreatedModal;
+window.updateProductSupplierSelectForModal = updateProductSupplierSelectForModal;
+window.saveCreatedProductFromModal = saveCreatedProductFromModal;
+window.loadInventory = loadInventory;
+window.deleteProduct = deleteProduct;
+window.adjustStock = adjustStock;
+window.quickRestock = quickRestock;
+window.generatePurchaseOrder = generatePurchaseOrder;
+window.createWarehouse = createWarehouse;
+window.createBatchFromUI = createBatchFromUI;
+window.createBatch = createBatch;
+window.loadBatches = loadBatches;
+window.openWarehouseInfoModal = openWarehouseInfoModal;
+window.closeWarehouseInfoModal = closeWarehouseInfoModal;
+window.deleteBatch = deleteBatch;
+window.openBatchEditModal = openBatchEditModal;
+window.closeBatchEditModal = closeBatchEditModal;
+window.saveBatchEdit = saveBatchEdit;
+window.openRecipeModal = openRecipeModal;
+window.closeRecipeModal = closeRecipeModal;
+window.openRecipeListModal = openRecipeListModal;
+window.closeRecipeListModal = closeRecipeListModal;
+window.renderRecipeList = renderRecipeList;
+window.deleteRecipe = deleteRecipe;
+window.addIngredientRow = addIngredientRow;
+window.saveRecipe = saveRecipe;
+window.loadRecipes = loadRecipes;
+window.openTankModal = openTankModal;
+window.closeTankModal = closeTankModal;
+window.saveTank = saveTank;
+window.loadTanks = loadTanks;
+window.deleteTank = deleteTank;
+window.runProductionFlow = runProductionFlow;
+window.editPlanningDemand = editPlanningDemand;
+window.editWeeklyCapacity = editWeeklyCapacity;
+window.editWeeklyVolumeTableValue = editWeeklyVolumeTableValue;
+window.openNotificationsModal = openNotificationsModal;
+window.closeNotificationsModal = closeNotificationsModal;
+window.openTankInfoModal = openTankInfoModal;
+window.deleteActiveProduction = deleteActiveProduction;
+window.deleteTrackingHistoryEntry = deleteTrackingHistoryEntry;
+window.closeTankInfoModal = closeTankInfoModal;
+window.openTankScheduleForm = openTankScheduleForm;
+window.closeTankScheduleModal = closeTankScheduleModal;
+window.suggestTankScheduleEnd = suggestTankScheduleEnd;
+window.saveTankSchedule = saveTankSchedule;
+window.switchProductionTab = switchProductionTab;
+window.changeWeekMode = changeWeekMode;
+window.saveWeeklyDemandAdjustment = saveWeeklyDemandAdjustment;
+window.importWeeklyDemandFromOrders = importWeeklyDemandFromOrders;
+window.updateWeeklyEditTankSelect = updateWeeklyEditTankSelect;
+window.weeklyWeekChanged = weeklyWeekChanged;
+window.updateWeeklyLitersSplitPreview = updateWeeklyLitersSplitPreview;
+window.resetWeeklyProductionForm = resetWeeklyProductionForm;
+window.openWeeklyProductionHistoryEditor = openWeeklyProductionHistoryEditor;
+window.editWeeklyProductionEntry = editWeeklyProductionEntry;
+window.deleteWeeklyProductionEntry = deleteWeeklyProductionEntry;
+window.weeklyProductionCheckIngredients = weeklyProductionCheckIngredients;
+window.openSelectedWeeklyRawItem = openSelectedWeeklyRawItem;
+window.startWeeklyProductionActive = startWeeklyProductionActive;
+window.openSelectedWizardRawItem = openSelectedWizardRawItem;
+window.finishProduction = finishProduction;
+
+// Exponer funciones del módulo de parámetros generales
+window.loadSystemParametersForm = loadSystemParametersForm;
+window.updateCapacidadSemanalSugerida = updateCapacidadSemanalSugerida;
+window.saveSystemParametersForm = saveSystemParametersForm;
+window.resetDefaultParameters = resetDefaultParameters;

@@ -18,11 +18,13 @@ export function getLocalDateStr(date = new Date()) {
 export function litersToBottles(liters) {
     const n = Number(liters);
     if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.floor(n / LITERS_PER_BOTTLE);
+    const size = window.systemParameters?.tamanoBotella || LITERS_PER_BOTTLE;
+    return Math.floor(n / size);
 }
 
 export function getProductVolumePerUnit(product) {
-    return product?.volumePerUnit || LITERS_PER_BOTTLE;
+    const size = window.systemParameters?.tamanoBotella || LITERS_PER_BOTTLE;
+    return product?.volumePerUnit || size;
 }
 
 export function getWeekIndexFromToday(dateStr) {

@@ -27,7 +27,17 @@ const initial = {
     customWeeklyOverflowBottles: savedState.customWeeklyOverflowBottles || [],
     customWeeklyOverflowLiters: savedState.customWeeklyOverflowLiters || [],
     weeklyDemandOverridesActive: savedState.weeklyDemandOverridesActive || false,
-    recipes: savedState.recipes || []
+    recipes: savedState.recipes || [],
+    systemParameters: savedState.systemParameters || {
+        numeroTanques: 6,
+        capacidadTanque: 120,
+        diasFermentacion: 7,
+        capacidadSemanalTotal: 720,
+        numeroSabores: 6,
+        tamanoBotella: 0.33,
+        horizontePlanificacion: 4,
+        barreraDemanda: 14
+    }
 };
 
 window._initialState = initial;
