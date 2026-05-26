@@ -48,5 +48,26 @@ export function openTankInfoModal(id) {
     }
 
     if (content) content.innerHTML = html;
+
+    const deleteBtn = document.getElementById('tank-info-delete-btn');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            if (window.deleteTank) {
+                window.deleteTank(tank.id);
+                window.closeTankInfoModal();
+            }
+        };
+    }
+
+    const editBtn = document.getElementById('tank-info-edit-btn');
+    if (editBtn) {
+        editBtn.onclick = () => {
+            if (window.openTankModal) {
+                window.closeTankInfoModal();
+                window.openTankModal(tank.id);
+            }
+        };
+    }
+
     document.getElementById('tank-info-modal').classList.remove('hidden');
 }
