@@ -455,53 +455,8 @@ function seedSampleData() {
         }
     });
 
-    const flavors = [201, 202, 203, 204, 205, 206];
     orders = [];
-    flavors.forEach((productId, idx) => {
-        orders.push({
-            id: 1000 + idx,
-            productId: productId,
-            qty: 100 / LITERS_PER_BOTTLE,
-            dueDate: getDateForWeekOffset(0),
-            createdAt: new Date().toISOString()
-        });
-        orders.push({
-            id: 2000 + idx,
-            productId: productId,
-            qty: 100 / LITERS_PER_BOTTLE,
-            dueDate: getDateForWeekOffset(1),
-            createdAt: new Date().toISOString()
-        });
-    });
-
     forecasts = [];
-    flavors.forEach((productId, idx) => {
-        forecasts.push({
-            id: 3000 + idx,
-            productId: productId,
-            qty: 509 / 6,
-            targetDate: getDateForWeekOffset(0)
-        });
-        forecasts.push({
-            id: 4000 + idx,
-            productId: productId,
-            qty: 510 / 6,
-            targetDate: getDateForWeekOffset(1)
-        });
-        forecasts.push({
-            id: 5000 + idx,
-            productId: productId,
-            qty: 510 / 6,
-            targetDate: getDateForWeekOffset(2)
-        });
-        forecasts.push({
-            id: 6000 + idx,
-            productId: productId,
-            qty: 511 / 6,
-            targetDate: getDateForWeekOffset(3)
-        });
-    });
-
     tanks = [
         { id: 1, name: 'Tanque Fermentador 1', capacityLiters: 120, schedule: [] },
         { id: 2, name: 'Tanque Fermentador 2', capacityLiters: 120, schedule: [] },
@@ -513,47 +468,9 @@ function seedSampleData() {
 
     productionHistory = [];
 
-    // Semana 1: Solo una producción de 120 L para IPA Pijao (id: 201)
-    productionHistory.push({
-        id: 10000,
-        productId: 201,
-        qtyLiters: 120,
-        qtyUnits: 120 / LITERS_PER_BOTTLE,
-        startDate: getDateForWeekOffset(0),
-        endDate: getDateForWeekOffset(0),
-        week: 1,
-        tankName: 'Tanque Fermentador 1',
-        fermentationDays: 7,
-        fixedOrders: 100,
-        overflowBottles: Math.floor(20 / LITERS_PER_BOTTLE),
-        overflowLiters: 20,
-        isActive: false
-    });
-
-    // Semana 2: Vacía (sin historial)
-
-    // Semana 3: Producción de 80 L por sabor para pronóstico (480 L en total)
-    flavors.forEach((productId, idx) => {
-        productionHistory.push({
-            id: 30000 + idx,
-            productId: productId,
-            qtyLiters: 80,
-            qtyUnits: 80 / LITERS_PER_BOTTLE,
-            startDate: getDateForWeekOffset(2),
-            endDate: getDateForWeekOffset(2),
-            week: 3,
-            tankName: 'Tanque Fermentador ' + (idx + 1),
-            fermentationDays: 7,
-            fixedOrders: 0,
-            overflowBottles: 0,
-            overflowLiters: 0,
-            isActive: false
-        });
-    });
-
     customWeeklyCapacities = [720, 720, 720, 720];
-    customWeeklyBarrilDemand = [100, 0, 0, 0];
-    customWeeklyForecastLiters = [168, 168.3, 168.3, 168.63];
+    customWeeklyBarrilDemand = [0, 0, 0, 0];
+    customWeeklyForecastLiters = [0, 0, 0, 0];
     customWeeklyOverflowBottles = [0, 0, 0, 0];
     customWeeklyOverflowLiters = [0, 0, 0, 0];
     weeklyDemandOverridesActive = false;
@@ -1435,13 +1352,6 @@ function runProductionFlow(force = false) {
         demandBotellas[p.id] = [0, 0, 0, 0];
     });
 
-    const getWeekIndexForHistoryEntry = (hist) => {
-        if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
-            return hist.week - 1;
-        }
-        return getWeekIndexFromDate(hist.startDate || hist.endDate);
-    };
-
     orders.forEach(o => {
         const w = getWeekIndexFromToday(o.dueDate);
         if (demandBarril[o.productId]) {
@@ -1487,14 +1397,6 @@ function runProductionFlow(force = false) {
         }
     }
 
-    for (let w = 0; w < 4; w++) {
-        if (customWeeklyOverflowLiters[w] > 0) {
-            weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w];
-        } else if (customWeeklyOverflowBottles[w] > 0) {
-            weeklyOverflowLiters[w] = customWeeklyOverflowBottles[w] * systemParameters.tamanoBotella;
-        }
-    }
-
     // Initialize and calculate mpsPlan and weeklyProducedLiters first so they are ready for the volume table loop
     const mpsPlan = {};
     finalProducts.forEach(p => {
@@ -1519,6 +1421,20 @@ function runProductionFlow(force = false) {
             }
         });
     });
+
+    for (let w = 0; w < 4; w++) {
+        if (w === 0 || w === 1) {
+            weeklyOverflowLiters[w] = Math.max(0, weeklyProducedLiters[w] - weeklyBarrilDemand[w]);
+        } else {
+            weeklyOverflowLiters[w] = 0;
+        }
+
+        if (customWeeklyOverflowLiters[w] > 0) {
+            weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w];
+        } else if (customWeeklyOverflowBottles[w] > 0) {
+            weeklyOverflowLiters[w] = customWeeklyOverflowBottles[w] * systemParameters.tamanoBotella;
+        }
+    }
 
     // Inventario inicial PT en litros
     const initialInvLiters = finalProducts.reduce(
@@ -2662,8 +2578,17 @@ function saveWeeklyDemandAdjustment() {
     for (let w = 0; w < 4; w++) {
         const pedidos = document.getElementById(`weekly-demand-pedidos-${w}`);
         const pronostico = document.getElementById(`weekly-demand-pronostico-${w}`);
-        customWeeklyBarrilDemand[w] = Math.max(0, parseFloat(pedidos?.value) || 0);
-        customWeeklyForecastLiters[w] = Math.max(0, parseFloat(pronostico?.value) || 0);
+        const newVal = Math.max(0, parseFloat(pedidos?.value) || 0);
+        const newForecast = Math.max(0, parseFloat(pronostico?.value) || 0);
+
+        const oldVal = customWeeklyBarrilDemand[w] ?? 0;
+        const oldForecast = customWeeklyForecastLiters[w] ?? 0;
+
+        if (newVal !== oldVal || newForecast !== oldForecast) {
+            customWeeklyBarrilDemand[w] = newVal;
+            customWeeklyForecastLiters[w] = newForecast;
+            syncActiveProductionToDemand(w);
+        }
     }
     weeklyDemandOverridesActive = true;
     saveData();
@@ -2782,6 +2707,9 @@ function deleteDemand(id, type) {
         }
     }
 
+    // Propagate changes to production and tank schedules
+    syncActiveProductionToDemand(deletedWeekIndex);
+
     saveData();
     refreshAppUI();
     renderWeeklyDemandAdjustment();
@@ -2869,6 +2797,12 @@ function saveDemandEdit(event) {
                 customWeeklyForecastLiters[newWeekIndex] = Math.max(0, (customWeeklyForecastLiters[newWeekIndex] || 0) + qtyLiters);
             }
         }
+    }
+
+    // Sync back to production and tank schedules
+    syncActiveProductionToDemand(oldWeekIndex);
+    if (oldWeekIndex !== newWeekIndex) {
+        syncActiveProductionToDemand(newWeekIndex);
     }
 
     closeDemandEditModal();
@@ -3274,6 +3208,13 @@ function updateWeeklyLitersSplitPreview() {
     `;
 }
 
+function getWeekIndexForHistoryEntry(hist) {
+    if (hist.week !== null && hist.week !== undefined && hist.week >= 1 && hist.week <= 4) {
+        return hist.week - 1;
+    }
+    return getWeekIndexFromToday(hist.startDate || hist.endDate);
+}
+
 function getWeeklyIndexFromForm() {
     const weekSelect = document.getElementById('weekly-edit-week')?.value;
     if (weekSelect) return Math.max(0, Math.min(3, parseInt(weekSelect, 10) - 1));
@@ -3282,7 +3223,58 @@ function getWeeklyIndexFromForm() {
     return 0;
 }
 
-function applyWeeklyLitersSplitToDemand(productId, weekIndex, fixedLiters, forecastLiters, targetDate, previousFixed = 0, previousForecast = 0) {
+function syncActiveProductionToDemand(weekIndex) {
+    if (weekIndex < 0 || weekIndex > 3) return;
+    const entry = productionHistory.find(hist => getWeekIndexForHistoryEntry(hist) === weekIndex && hist.isActive === true);
+    if (entry) {
+        const product = inventory.find(p => p.id === entry.productId);
+        const unitVolume = getProductVolumePerUnit(product);
+        const newVal = customWeeklyBarrilDemand[weekIndex];
+        
+        // 1. Update production entry fixed orders
+        entry.fixedOrders = newVal;
+
+        const total = entry.qtyLiters || 0;
+        const overflow = Math.max(0, total - newVal);
+        entry.overflowLiters = overflow;
+        entry.overflowBottles = Math.floor(overflow / unitVolume);
+
+        // 2. Update tank schedule (qty remains equal to total qtyLiters, so no change to sched.qty)
+
+        // 3. Update the corresponding order in orders array!
+        const order = orders.find(o => o.productId === entry.productId && getWeekIndexFromToday(o.dueDate) === weekIndex);
+        if (order) {
+            order.qty = newVal / unitVolume;
+        } else if (newVal > 0) {
+            orders.push({
+                id: Date.now(),
+                productId: entry.productId,
+                qty: newVal / unitVolume,
+                dueDate: entry.startDate || getLocalDateStr(),
+                createdAt: new Date().toISOString()
+            });
+        }
+
+        // 4. Update the corresponding forecast in forecasts array!
+        const forecastVal = customWeeklyForecastLiters[weekIndex];
+        const forecastItem = forecasts.find(f => f.productId === entry.productId && getWeekIndexFromToday(f.targetDate) === weekIndex);
+        if (forecastItem) {
+            forecastItem.qty = forecastVal / unitVolume;
+        } else if (forecastVal > 0) {
+            forecasts.push({
+                id: Date.now() + 1,
+                productId: entry.productId,
+                qty: forecastVal / unitVolume,
+                targetDate: entry.startDate || getLocalDateStr()
+            });
+        }
+
+        customWeeklyOverflowLiters[weekIndex] = overflow;
+        customWeeklyOverflowBottles[weekIndex] = Math.floor(overflow / unitVolume);
+    }
+}
+
+function applyWeeklyLitersSplitToDemand(productId, weekIndex, totalLiters, fixedLiters, forecastLiters, targetDate, previousTotal = 0, previousFixed = 0, previousForecast = 0) {
     if (weekIndex < 0 || weekIndex > 3) return;
     const product = inventory.find(p => p.id === productId);
     if (!product || product.type === 'raw') return;
@@ -3403,11 +3395,38 @@ function editWeeklyProductionEntry(entryId) {
 function deleteWeeklyProductionEntry(entryId) {
     if (!confirm('¿Eliminar este registro de producción? Esta acción no se puede deshacer.')) return;
 
+    const entry = productionHistory.find(hist => hist.id === entryId);
+    let wIdx = -1;
+    let prodId = -1;
+    if (entry) {
+        wIdx = getWeekIndexForHistoryEntry(entry);
+        prodId = entry.productId;
+    }
+
     tanks.forEach(t => {
         t.schedule = (t.schedule || []).filter(s => s.id !== entryId);
     });
 
     productionHistory = productionHistory.filter(hist => hist.id !== entryId);
+
+    if (wIdx >= 0 && wIdx <= 3) {
+        customWeeklyBarrilDemand[wIdx] = 0;
+        customWeeklyForecastLiters[wIdx] = 0;
+        customWeeklyOverflowLiters[wIdx] = 0;
+        customWeeklyOverflowBottles[wIdx] = 0;
+
+        if (prodId !== -1) {
+            orders = orders.filter(o => {
+                if (o.productId !== prodId) return true;
+                return getWeekIndexFromToday(o.dueDate) !== wIdx;
+            });
+            forecasts = forecasts.filter(f => {
+                if (f.productId !== prodId) return true;
+                return getWeekIndexFromToday(f.targetDate) !== wIdx;
+            });
+        }
+    }
+
     saveData();
     refreshAppUI();
     showNotification('Registro de producción eliminado.', 'success');
@@ -3617,6 +3636,21 @@ function startWeeklyProductionActive() {
         packagingEnd: endDate
     };
 
+    let previousTotal = 0;
+    let previousFixed = 0;
+    let previousForecast = 0;
+    if (isEdit) {
+        const oldEntry = productionHistory.find(h => h.id === entryId);
+        if (oldEntry) {
+            previousTotal = oldEntry.qtyLiters || 0;
+            previousFixed = oldEntry.fixedOrders || 0;
+            const wIdx = getWeekIndexForHistoryEntry(oldEntry);
+            if (wIdx === 2 || wIdx === 3) {
+                previousForecast = Math.max(0, previousTotal - previousFixed);
+            }
+        }
+    }
+
     if (isEdit) {
         tanks.forEach(t => {
             t.schedule = (t.schedule || []).filter(s => s.id !== entryId);
@@ -3654,16 +3688,7 @@ function startWeeklyProductionActive() {
         showNotification(`Producción iniciada: ${formatDecimal(litersToFerment)} L a fermentar. Pedidos fijos: ${formatDecimal(fixedOrders)} L · Pronóstico: ${formatDecimal(forecastLitersValue)} L · Overflow: ${formatDecimal(overflowValue)} L`, 'success');
     }
 
-    let previousFixed = 0;
-    let previousForecast = 0;
-    if (isEdit) {
-        const oldEntry = productionHistory.find(h => h.id === entryId);
-        if (oldEntry) {
-            previousFixed = oldEntry.fixedOrders || 0;
-            previousForecast = oldEntry.qtyLiters || 0;
-        }
-    }
-    applyWeeklyLitersSplitToDemand(prodId, weekIndex, fixedOrders, forecastLitersValue, dateInput, previousFixed, previousForecast);
+    applyWeeklyLitersSplitToDemand(prodId, weekIndex, litersToFerment, fixedOrders, forecastLitersValue, dateInput, previousTotal, previousFixed, previousForecast);
 
     saveData();
     refreshAppUI();
@@ -3682,7 +3707,7 @@ function checkIngredientsForProduction(productId, litersToProduce) {
 
     for (const ing of recipe.ingredients) {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
-        if (!raw) return false;
+        if (!raw) continue;
         const reqQty = ing.qtyPerUnit * litersToProduce;
         if (raw.quantity < reqQty) {
             return false;
