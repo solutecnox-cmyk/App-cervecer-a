@@ -324,11 +324,11 @@ let tanks = initial.tanks || savedState.tanks || JSON.parse(localStorage.getItem
 let purchaseOrders = initial.purchaseOrders || savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || [];
 let productionHistory = initial.productionHistory || savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || [];
 let weekCalculationMode = (initial.weekCalculationMode || savedState.weekCalculationMode) || 'month';
-let customWeeklyCapacities = initial.customWeeklyCapacities || savedState.customWeeklyCapacities || [720, 720, 720, 720];
-let customWeeklyBarrilDemand = initial.customWeeklyBarrilDemand || savedState.customWeeklyBarrilDemand || [600, 600, 0, 0];
-let customWeeklyForecastLiters = initial.customWeeklyForecastLiters || savedState.customWeeklyForecastLiters || [168, 168.3, 168.3, 168.63];
-let customWeeklyOverflowBottles = initial.customWeeklyOverflowBottles || savedState.customWeeklyOverflowBottles || [363.63, 363.63, 0, 0];
-let customWeeklyOverflowLiters = initial.customWeeklyOverflowLiters || savedState.customWeeklyOverflowLiters || [120, 120, 0, 0];
+let customWeeklyCapacities = (initial.customWeeklyCapacities && initial.customWeeklyCapacities.length > 0) ? initial.customWeeklyCapacities : ((savedState.customWeeklyCapacities && savedState.customWeeklyCapacities.length > 0) ? savedState.customWeeklyCapacities : [720, 720, 720, 720]);
+let customWeeklyBarrilDemand = (initial.customWeeklyBarrilDemand && initial.customWeeklyBarrilDemand.length > 0) ? initial.customWeeklyBarrilDemand : ((savedState.customWeeklyBarrilDemand && savedState.customWeeklyBarrilDemand.length > 0) ? savedState.customWeeklyBarrilDemand : [600, 600, 0, 0]);
+let customWeeklyForecastLiters = (initial.customWeeklyForecastLiters && initial.customWeeklyForecastLiters.length > 0) ? initial.customWeeklyForecastLiters : ((savedState.customWeeklyForecastLiters && savedState.customWeeklyForecastLiters.length > 0) ? savedState.customWeeklyForecastLiters : [168, 168.3, 168.3, 168.63]);
+let customWeeklyOverflowBottles = (initial.customWeeklyOverflowBottles && initial.customWeeklyOverflowBottles.length > 0) ? initial.customWeeklyOverflowBottles : ((savedState.customWeeklyOverflowBottles && savedState.customWeeklyOverflowBottles.length > 0) ? savedState.customWeeklyOverflowBottles : [363.63, 363.63, 0, 0]);
+let customWeeklyOverflowLiters = (initial.customWeeklyOverflowLiters && initial.customWeeklyOverflowLiters.length > 0) ? initial.customWeeklyOverflowLiters : ((savedState.customWeeklyOverflowLiters && savedState.customWeeklyOverflowLiters.length > 0) ? savedState.customWeeklyOverflowLiters : [120, 120, 0, 0]);
 let weeklyDemandOverridesActive = typeof initial.weeklyDemandOverridesActive !== 'undefined' ? initial.weeklyDemandOverridesActive : (savedState.weeklyDemandOverridesActive || false);
 let systemParameters = initial.systemParameters || savedState.systemParameters || {
     numeroTanques: 6,
