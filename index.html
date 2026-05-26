@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Gestión - Cervecería</title>
     <link rel="icon" href="logo.png" type="image/png">
+    <script>
+        // Suppress Tailwind CSS CDN production warning
+        (function() {
+            const origWarn = console.warn;
+            console.warn = function(...args) {
+                if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) {
+                    return;
+                }
+                origWarn.apply(console, args);
+            };
+        })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
@@ -139,6 +151,11 @@
                     <li>
                         <button onclick="showSection('produccion')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
                             <i class="fas fa-industry mr-3"></i> Dashboard Producción
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="showSection('parametros')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-cogs mr-3"></i> Parámetros Generales
                         </button>
                     </li>
                 </ul>
@@ -403,6 +420,10 @@
                             </div>
                         </div>
                         <div id="weekly-demand-adjustment-table"></div>
+                        <div class="mt-8 border-t border-gray-200 pt-6">
+                            <h3 class="text-lg font-bold mb-4 text-[#005B3A]"><i class="fas fa-list-ul mr-2"></i> Listado de Pedidos y Pronósticos Registrados</h3>
+                            <div id="weekly-demand-list-container" class="overflow-x-auto"></div>
+                        </div>
                     </div>
 
                     <div id="weekly-production-history-editor" class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto mb-6"></div>
@@ -422,7 +443,7 @@
                 <div id="tab-planeacion" class="hidden fade-in">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-calendar-alt"></i> Planeación a 4 Semanas</h2>
-                        <button onclick="runProductionFlow()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded font-bold shadow-md"><i class="fas fa-play mr-2"></i> Ejecutar Cálculo MPS/MRP</button>
+                        <button onclick="runProductionFlow(true)" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded font-bold shadow-md"><i class="fas fa-play mr-2"></i> Ejecutar Cálculo MPS/MRP</button>
                     </div>
                     
                     <div id="production-output" class="mb-4">
@@ -457,6 +478,120 @@
                     <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
                         <h3 class="text-lg font-bold mb-3 text-gray-700">Plan de Requerimientos de Materiales (MRP)</h3>
                         <div id="mrp-table-container"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sección de Parámetros -->
+            <section id="parametros" class="section fade-in">
+                <div class="flex justify-between items-center mb-6 gap-3 flex-wrap">
+                    <h1 class="text-3xl font-bold text-gray-800"><i class="fas fa-cogs text-[#005B3A] mr-2"></i> Parámetros Generales</h1>
+                    <button onclick="saveSystemParametersForm()" class="bg-[#005B3A] text-white px-5 py-2.5 rounded-lg hover:bg-[#00422a] font-bold shadow-md transition-all">
+                        <i class="fas fa-save mr-2"></i> Guardar y Aplicar
+                    </button>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
+                    <h2 class="text-xl font-bold text-gray-700 mb-2"><i class="fas fa-sliders-h mr-2"></i> Configuración del Entorno de Planeación</h2>
+                    <p class="text-sm text-gray-500 mb-6">Ajusta los valores del modelo operativo. Los cambios se sincronizarán inmediatamente con los módulos MPS y MRP.</p>
+                    
+                    <form id="system-parameters-form" onsubmit="event.preventDefault(); saveSystemParametersForm();">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <!-- Número de Tanques -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-flask text-indigo-600 mr-1"></i> Número de Tanques
+                                </label>
+                                <input type="number" id="param-tanques" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="updateCapacidadSemanalSugerida()">
+                                <p class="text-[10px] text-gray-500 mt-1">Tanques físicos en planta.</p>
+                            </div>
+                            
+                            <!-- Capacidad por Tanque -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-oil-can text-amber-600 mr-1"></i> Capacidad por Tanque (L)
+                                </label>
+                                <input type="number" id="param-capacidad-tanque" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="updateCapacidadSemanalSugerida()">
+                                <p class="text-[10px] text-gray-500 mt-1">Capacidad neta por lote.</p>
+                            </div>
+
+                            <!-- Tiempo de Fermentación -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-hourglass-half text-green-600 mr-1"></i> Fermentación (Días)
+                                </label>
+                                <input type="number" id="param-fermentacion" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Días que se ocupa un tanque.</p>
+                            </div>
+
+                            <!-- Capacidad Semanal Total -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-chart-bar text-teal-600 mr-1"></i> Capacidad Semanal Total (L)
+                                </label>
+                                <input type="number" id="param-capacidad-semanal" min="1" required class="w-full p-2 border border-gray-300 rounded-md bg-blue-50 focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-blue-700 mt-1" id="sugerido-capacidad-semanal">Capacidad calculada: 720 L</p>
+                            </div>
+
+                            <!-- Número de Sabores -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-beer text-orange-600 mr-1"></i> Número de Sabores
+                                </label>
+                                <input type="number" id="param-sabores" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Variedades en catálogo.</p>
+                            </div>
+
+                            <!-- Tamaño de Botella -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-wine-bottle text-red-600 mr-1"></i> Tamaño de Botella (L)
+                                </label>
+                                <input type="number" id="param-tamano-botella" step="0.001" min="0.05" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Volumen estándar (ej. 0.33 L).</p>
+                            </div>
+
+                            <!-- Horizonte de Planificación -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-calendar-alt text-purple-600 mr-1"></i> Horizonte (Semanas)
+                                </label>
+                                <input type="number" id="param-horizonte" min="1" max="12" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Semanas proyectadas (MPS/MRP).</p>
+                            </div>
+
+                            <!-- Barrera de Demanda -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-shield-alt text-blue-600 mr-1"></i> Barrera de Demanda (Días)
+                                </label>
+                                <input type="number" id="param-barrera" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Días comprometidos sin cambios.</p>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-5 rounded-xl shadow border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-3"><i class="fas fa-info-circle text-[#005B3A] mr-2"></i> Lógica de Cálculos e Indicadores</h3>
+                        <ul class="text-xs text-gray-600 space-y-2 list-disc list-inside">
+                            <li><strong>Capacidad Total:</strong> Se calcula automáticamente a partir del número de tanques y su volumen base.</li>
+                            <li><strong>Barrera de Demanda:</strong> Determina el punto temporal a partir del cual las órdenes pasan de ser compras en barril firmes (gastrobares) a proyecciones basadas en pronósticos de botellas.</li>
+                            <li><strong>Planificación MRP:</strong> Utiliza el tamaño de botella configurado para hacer explosiones de materiales, conversiones de litros a unidades finales, y estimación de maltas/lúpulos según las recetas BOM guardadas.</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl shadow border border-gray-200 flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-gray-700 mb-2"><i class="fas fa-sync text-green-700 mr-2"></i> Sincronización Automática</h3>
+                            <p class="text-xs text-gray-500 leading-relaxed">Al presionar "Guardar y Aplicar", el sistema guardará estos parámetros de forma persistente en <strong>localStorage</strong> y recalculará de forma inmediata el MPS y MRP para asegurar la consistencia del inventario y la planificación.</p>
+                        </div>
+                        <div class="pt-4 border-t mt-4 flex justify-end">
+                            <button type="button" onclick="resetDefaultParameters()" class="text-sm font-semibold text-red-600 hover:text-red-800 transition-colors">
+                                <i class="fas fa-undo mr-1"></i> Reestablecer Parámetros por Defecto
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -638,7 +773,44 @@
         <div class="bg-white p-8 rounded-lg w-full max-w-md">
             <div class="flex justify-between items-center mb-4"><h2 id="tank-info-title" class="text-2xl font-bold text-gray-800">Detalles del Tanque</h2><button onclick="closeTankInfoModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button></div>
             <div id="tank-info-content" class="text-gray-700 text-sm space-y-3"></div>
-            <div class="mt-6 flex justify-end"><button onclick="closeTankInfoModal()" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Cerrar</button></div>
+            <div class="mt-6 flex justify-between items-center gap-2">
+                <div class="flex gap-2">
+                    <button id="tank-info-delete-btn" class="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-semibold transition-colors">
+                        <i class="fas fa-trash-alt mr-1"></i> Eliminar
+                    </button>
+                    <button id="tank-info-edit-btn" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-sm font-semibold transition-colors">
+                        <i class="fas fa-edit mr-1"></i> Editar
+                    </button>
+                </div>
+                <button onclick="closeTankInfoModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold transition-colors">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Editar Demanda (Pedido/Pronóstico) -->
+    <div id="demand-edit-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md shadow-2xl border border-gray-100">
+            <h2 id="demand-edit-title" class="text-2xl font-bold mb-4 text-[#005B3A]">Editar Demanda</h2>
+            <form id="demand-edit-form" onsubmit="saveDemandEdit(event)">
+                <input type="hidden" id="edit-demand-id">
+                <input type="hidden" id="edit-demand-type"> <!-- 'order' o 'forecast' -->
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Producto</label>
+                    <input type="text" id="edit-demand-product-name" disabled class="w-full p-2 border border-gray-300 rounded-md bg-gray-100 font-medium">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Cantidad (Litros)</label>
+                    <input type="number" id="edit-demand-qty" required step="0.01" min="0.01" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Fecha de Entrega / Objetivo</label>
+                    <input type="date" id="edit-demand-date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="closeDemandEditModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold transition-colors">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a] font-semibold transition-colors shadow">Guardar Cambios</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -698,6 +870,6 @@
             }
         });
     </script>
-    <script src="funciones.js"></script>
+    <script type="module" src="funciones.js"></script>
 </body>
 </html>
