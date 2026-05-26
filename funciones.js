@@ -1696,18 +1696,6 @@ function runProductionFlow(force = false) {
                         <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(producedTotal)} L</td>
                         <td class="p-2 border text-center font-bold">100%</td>
                     </tr>
-                    <tr class="bg-blue-50">
-                        <td class="p-2 border font-semibold text-[13px] text-blue-900">📊 Litros producidos (plan)</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-bold text-blue-800">${formatDecimal(weeklyBarrilDemand[w] + adjustedOverflowLiters[w])} L</td>`).join('')}
-                        <td class="p-2 border text-center font-bold text-blue-800">${formatDecimal(producedTotal)} L</td>
-                        <td class="p-2 border text-center font-bold">100%</td>
-                    </tr>
-                    <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">⚙️ % Utilización capacidad</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center font-semibold ${weeklyCapacityUtilization[w] > 100 ? 'text-red-600' : 'text-blue-700'}">${weeklyCapacityUtilization[w]}%</td>`).join('')}
-                        <td class="p-2 border text-center font-bold">${weeklyCapacityUtilization.reduce((a, b) => a + b, 0) > 0 ? Math.round((producedTotal / (customWeeklyCapacities.reduce((a, b) => a + b, 0) || 1)) * 100) : 0}%</td>
-                        <td class="p-2 border text-center text-gray-500 text-xs">Cap. ${systemParameters.capacidadSemanalTotal} L/sem</td>
-                    </tr>
                 </tbody>
             </table>
         `;
