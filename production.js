@@ -1,7 +1,7 @@
 // production.js
 // Implementaciones MPS/MRP y fórmulas matemáticas del Excel para la Cervecería
 
-import { LITERS_PER_BOTTLE, getProductVolumePerUnit } from './utils.js';
+import { LITERS_PER_BOTTLE, getProductVolumePerUnit, getWeekIndexFromToday } from './utils.js';
 
 // --- 1. CAPACIDAD DE PRODUCCIÓN ---
 /**
@@ -309,8 +309,7 @@ export function computeWeeklyDemandFromOrders() {
     today.setHours(0, 0, 0, 0);
 
     window.orders.forEach(o => {
-        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
-        const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+        const w = getWeekIndexFromToday(o.dueDate);
         const prod = window.inventory.find(p => p.id === o.productId);
         if (prod && prod.type !== 'raw') {
             barril[w] += o.qty * getProductVolumePerUnit(prod);
@@ -318,8 +317,7 @@ export function computeWeeklyDemandFromOrders() {
     });
 
     window.forecasts.forEach(f => {
-        const diffDays = Math.floor((new Date(f.targetDate) - today) / (1000 * 60 * 60 * 24));
-        const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+        const w = getWeekIndexFromToday(f.targetDate);
         const prod = window.inventory.find(p => p.id === f.productId);
         if (prod && prod.type !== 'raw') {
             forecastL[w] += f.qty * getProductVolumePerUnit(prod);
