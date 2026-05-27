@@ -11,7 +11,8 @@ import {
     getWeekLabel,
     getWeekOfMonthLabel,
     getRelativeWeekLabel,
-    getDateForWeekOffset
+    getDateForWeekOffset,
+    getPlanningWeekHeaders
 } from './utils.js';
 import { loadState, saveState } from './storage.js';
 import * as Clients from './clients.js';
@@ -192,6 +193,15 @@ window.computeWeeklyDemandFromOrders = Production.computeWeeklyDemandFromOrders;
 window.computeWeeklyDemandForProduct = Production.computeWeeklyDemandForProduct;
 window.loadMRP = Production.loadMRP;
 window.renderPMPTable = Production.renderPMPTable;
+window.computePMPChainForProduct = Production.computePMPChainForProduct;
+window.calcularLotesPMP = Production.calcularLotesPMP;
+window.calcularPMPDesdeDemanda = Production.calcularPMPDesdeDemanda;
+window.obtenerCantidadBaseReceta = Production.obtenerCantidadBaseReceta;
+window.calcularRequerimientoPorLitro = Production.calcularRequerimientoPorLitro;
+window.calcularRequerimientoMaterialDesdeReceta = Production.calcularRequerimientoMaterialDesdeReceta;
+window.calcularMRP = Production.calcularMRP;
+window.calcularCompraMRP = Production.calcularCompraMRP;
+window.calcularPlanMRPMaterial = Production.calcularPlanMRPMaterial;
 
 // Fórmulas matemáticas de MPS/MRP del Excel
 window.calcularCapacidadTotal = Production.calcularCapacidadTotal;
@@ -217,7 +227,7 @@ window.calcularCostoTotal = Production.calcularCostoTotal;
 window.calcularUtilidad = Production.calcularUtilidad;
 window.calcularProduccionMensual = Production.calcularProduccionMensual;
 window.validarCapacidad = Production.validarCapacidad;
-window.calcularMRP = Production.calcularMRP;
+window.sumarRequerimientosMRP = Production.sumarRequerimientosMRP;
 window.calcularStockSeguridad = Production.calcularStockSeguridad;
 window.calcularPuntoReorden = Production.calcularPuntoReorden;
 window.calcularDisponibilidadTanque = Production.calcularDisponibilidadTanque;
@@ -297,9 +307,9 @@ let defaultRecipes = [
     {
         "productId": 201,
         "ingredients": [
-            { "ingredientProductId": 101, "qtyPerUnit": 0.225 },
-            { "ingredientProductId": 105, "qtyPerUnit": 0.00496 },
-            { "ingredientProductId": 106, "qtyPerUnit": 0.000670833 },
+            { "ingredientProductId": 101, "qtyForBatch": 27, "qtyPerUnit": 0.225 },
+            { "ingredientProductId": 105, "qtyForBatch": 0.595, "qtyPerUnit": 0.00496 },
+            { "ingredientProductId": 106, "qtyForBatch": 0.0805, "qtyPerUnit": 0.000670833 },
             { "ingredientProductId": 108, "qtyPerUnit": 3 },
             { "ingredientProductId": 109, "qtyPerUnit": 3 },
             { "ingredientProductId": 110, "qtyPerUnit": 3.1667 }
@@ -1427,21 +1437,42 @@ function getSemanaIndex(dateStr) {
 }
 
 function calcularLotesPMP(necesidadReal) {
-    if (necesidadReal <= 0) return 0;
-    if (necesidadReal <= 80) return 80;
-    if (necesidadReal <= 120) return 120;
+    return Production.calcularLotesPMP(necesidadReal);
+}
 
-    // Si es mayor a 120L
-    let lotes120 = Math.floor(necesidadReal / 120);
-    let remainder = necesidadReal % 120;
-    let extra = 0;
+function getBaseDemandaPedido(productId, weekIdx) {
+    const product = inventory.find(p => String(p.id) === String(productId));
+    if (!product) return 0;
+    let total = 0;
+    orders.forEach(o => {
+        if (String(o.productId) !== String(productId)) return;
+        const w = getSemanaIndex(o.dueDate);
+        if (w === weekIdx) total += o.qty * getProductVolumePerUnit(product);
+    });
+    return total;
+}
 
-    if (remainder > 0) {
-        if (remainder <= 80) extra = 80;
-        else extra = 120;
+function getBaseDemandaPronostico(productId, weekIdx) {
+    const product = inventory.find(p => String(p.id) === String(productId));
+    if (!product) return 0;
+    let total = 0;
+    forecasts.forEach(f => {
+        if (String(f.productId) !== String(productId)) return;
+        const w = getSemanaIndex(f.targetDate);
+        if (w === weekIdx) total += f.qty * getProductVolumePerUnit(product);
+    });
+    return total;
+}
+
+function setOrClearWeekOverride(map, productId, weekIdx, value, autoValue) {
+    if (!map[productId]) map[productId] = [];
+    if (Math.abs((Number(value) || 0) - (Number(autoValue) || 0)) < 0.005) {
+        map[productId][weekIdx] = undefined;
+        const allEmpty = map[productId].every(v => typeof v === 'undefined');
+        if (allEmpty) delete map[productId];
+    } else {
+        map[productId][weekIdx] = value;
     }
-
-    return (lotes120 * 120) + extra;
 }
 
 function inicializarMotorData() {
@@ -1455,6 +1486,7 @@ function inicializarMotorData() {
             demandaSemanalPronostico: [0, 0, 0, 0],
             demandaSemanalTotal: [0, 0, 0, 0],
             utilizacionCapacidad: [0, 0, 0, 0],
+            utilizacionGlobal: 0,
             inventarioFinalAgregado: [0, 0, 0, 0],
             overflowSemanas: [0, 0, 0, 0],
             lotesSemanales: [0, 0, 0, 0],
@@ -1570,9 +1602,8 @@ function calcularInventariosYPMP() {
         let invActual = (item.producto.quantity || 0) * getProductVolumePerUnit(item.producto);
 
         for (let w = 0; w < 4; w++) {
-            // Aplicar override de inv inicial de usuario si existe
-            if (w === 0 && customInventarioInicialOverrides[pId] !== undefined) {
-                invActual = Number(customInventarioInicialOverrides[pId]);
+            if (customInventarioInicialOverrides[pId] && customInventarioInicialOverrides[pId][w] !== undefined) {
+                invActual = Number(customInventarioInicialOverrides[pId][w]) || 0;
             }
             item.inventarioInicial[w] = invActual;
 
@@ -1630,47 +1661,73 @@ function calcularInventariosYPMP() {
             engine.globales.utilizacionCapacidad[w] = Math.round((engine.globales.produccionSemanal[w] / capSemana) * 1000) / 10;
         }
     }
+
+    const utilsValidas = engine.globales.utilizacionCapacidad.filter((_, w) => {
+        const cap = (customWeeklyCapacities && customWeeklyCapacities[w]) || systemParameters.capacidadSemanalTotal;
+        return cap > 0;
+    });
+    engine.globales.utilizacionGlobal = utilsValidas.length
+        ? Math.round((utilsValidas.reduce((a, b) => a + b, 0) / utilsValidas.length) * 10) / 10
+        : 0;
+}
+
+function getMaterialUnit(material) {
+    return material.unitType || material.unit || 'und';
+}
+
+function findRecipeForProduct(productId) {
+    return recipes.find(r => Number(r.productId) === Number(productId));
 }
 
 function calcularMRPEngine() {
     const engine = window.mpsEngine;
+    const litrosPorLote = systemParameters.capacidadTanque || 120;
 
     Object.values(engine.materiales).forEach(mat => {
-        let inv = mat.inventarioActual;
+        mat.requerimientosPorSabor = {};
+        const reqPorSemana = [0, 0, 0, 0];
 
         for (let w = 0; w < 4; w++) {
-            let reqBruto = 0;
             Object.values(engine.productos).forEach(prodItem => {
                 const pId = prodItem.producto.id;
-                const pmp = prodItem.pmpLotes[w];
-                const recipe = recipes.find(r => r.productId === pId);
+                const pmp = Number(prodItem.pmpLotes[w]) || 0;
+                const recipe = findRecipeForProduct(pId);
                 let saborReq = 0;
-                if (recipe) {
-                    const ing = recipe.ingredients.find(i => i.ingredientProductId === mat.material.id);
-                    if (ing) saborReq = (ing.qtyPerUnit * pmp);
+
+                if (recipe && Array.isArray(recipe.ingredients) && pmp > 0) {
+                    const ing = recipe.ingredients.find(i => Number(i.ingredientProductId) === Number(mat.material.id));
+                    if (ing) {
+                        const base = Production.obtenerCantidadBaseReceta(ing, litrosPorLote);
+                        saborReq = Production.calcularRequerimientoMaterialDesdeReceta(base, pmp, litrosPorLote);
+                    }
                 }
 
                 if (!mat.requerimientosPorSabor[pId]) mat.requerimientosPorSabor[pId] = [0, 0, 0, 0];
                 mat.requerimientosPorSabor[pId][w] = saborReq;
-                reqBruto += saborReq;
+                reqPorSemana[w] += saborReq;
             });
-
-            mat.requerimientoBruto[w] = reqBruto;
-            let invProyectado = inv - reqBruto;
-
-            if (invProyectado <= mat.material.safetyStock) {
-                let reqNeto = mat.material.safetyStock - invProyectado + reqBruto;
-                let ordenLanzada = Math.ceil(reqNeto / mat.material.purchaseUnit) * mat.material.purchaseUnit;
-                mat.pedidosLanzados[w] = ordenLanzada;
-                invProyectado += ordenLanzada;
-
-                let semanaLanzamiento = (w + 1) - mat.material.leadTime;
-                mat.semanaLanzamiento[w] = semanaLanzamiento;
-            }
-
-            mat.inventarioProyectado[w] = invProyectado;
-            inv = invProyectado;
         }
+
+        const safetyStock = Number(mat.material.safetyStock) || 0;
+        const purchaseUnit = Number(mat.material.purchaseUnit) || 1;
+        const plan = Production.calcularPlanMRPMaterial(
+            mat.inventarioActual,
+            reqPorSemana,
+            safetyStock,
+            purchaseUnit
+        );
+
+        mat.requerimientoBruto = plan.req;
+        mat.pedidosLanzados = plan.compra;
+        mat.inventarioProyectado = plan.inv;
+        mat.inventarioDisponible = plan.invInicialSemana;
+        mat.faltante = plan.req.map((req, w) => Math.max(0, req - plan.invInicialSemana[w]));
+        mat.estado = plan.compra.map(c => (c > 0 ? 'Comprar' : 'OK'));
+        mat.semanaLanzamiento = plan.compra.map((c, w) => (c > 0 ? w : null));
+        mat.stockFinal = plan.stockFinal;
+        mat.requeridoTotal = plan.req.reduce((a, b) => a + b, 0);
+        mat.faltanteTotal = mat.faltante.reduce((a, b) => a + b, 0);
+        mat.estadoGlobal = mat.estado.includes('Comprar') ? 'Comprar' : 'OK';
     });
 }
 
@@ -1679,7 +1736,7 @@ function renderMPS() {
     if (!mpsContainer) return;
 
     const engine = window.mpsEngine;
-    const weekHeaders = [0, 1, 2, 3].map(w => getWeekLabel(getDateForWeekOffset(w)));
+    const weekHeaders = getPlanningWeekHeaders();
 
     const saborId = engine.globales.saborSeleccionado || "all";
     let productosAVisualizar = Object.values(engine.productos);
@@ -1689,10 +1746,10 @@ function renderMPS() {
         <thead>
             <tr class="bg-[#005B3A] text-white">
                 <th class="p-2 border">Sabor</th>
-                <th class="p-2 border text-center">Semana 1 </th>
-                <th class="p-2 border text-center">Semana 2 </th>
-                <th class="p-2 border text-center">Semana 3 </th>
-                <th class="p-2 border text-center">Semana 4 </th>
+                <th class="p-2 border text-center">${weekHeaders[0]}</th>
+                <th class="p-2 border text-center">${weekHeaders[1]}</th>
+                <th class="p-2 border text-center">${weekHeaders[2]}</th>
+                <th class="p-2 border text-center">${weekHeaders[3]}</th>
                 <th class="p-2 border text-center">Total Litros</th>
             </tr>
         </thead>
@@ -1722,48 +1779,75 @@ function renderMPS() {
     mpsContainer.innerHTML = html;
 }
 
-window.editMPS = function editMPS(productoId, weekIndex, currentVal) {
-    const valInput = prompt(`Ingrese el nuevo valor del MPS (L) para la Semana ${weekIndex + 1}.\n(Deje en blanco para usar el cálculo automático):`, currentVal);
-    if (valInput === null) return;
-
-    if (!customMpsOverrides) customMpsOverrides = {};
-    if (!customMpsOverrides[productoId]) customMpsOverrides[productoId] = [undefined, undefined, undefined, undefined];
-
-    if (valInput.trim() === "") {
-        customMpsOverrides[productoId][weekIndex] = undefined;
-    } else {
-        const newVal = parseFloat(valInput);
-        if (isNaN(newVal) || newVal < 0) {
-            showNotification('Por favor ingrese un valor numérico válido mayor o igual a 0.', 'error');
-            return;
-        }
-        customMpsOverrides[productoId][weekIndex] = newVal;
+window.editMPS = function editMPS(productoId, weekIndex) {
+    if (typeof window.editMPS_Enhanced === 'function') {
+        window.editMPS_Enhanced(productoId, weekIndex);
+        return;
     }
-
-    saveData();
-    runProductionFlow();
-    showNotification('MPS actualizado.', 'success');
+    showNotification('No se pudo abrir el editor del PMP.', 'error');
 };
 
 window.saveMpsCellEditFromModal = function() {
-    const modal = document.getElementById('edit-planning-modal');
-    if (!modal) return;
-    const pid = Number(modal.dataset.productId);
-    const w = Number(modal.dataset.weekIdx);
-    const input = document.getElementById('edit-planning-value');
-    const val = Number(input.value);
-    
-    if (isNaN(val) || val < 0) {
-        showNotification('Valor inválido', 'error');
-        return;
+    const productId = document.getElementById('mps-cell-edit-product-id').value;
+    const weekIdx = parseInt(document.getElementById('mps-cell-edit-week-index').value, 10);
+    const pedido = parseFloat(document.getElementById('mps-cell-edit-pedido').value) || 0;
+    const pronostico = parseFloat(document.getElementById('mps-cell-edit-pronostico').value) || 0;
+    const invInicial = parseFloat(document.getElementById('mps-cell-edit-inventario-inicial').value) || 0;
+    const pmpRaw = document.getElementById('mps-cell-edit-pmp').value.trim();
+
+    setOrClearWeekOverride(customWeeklyBarrilDemand, productId, weekIdx, pedido, getBaseDemandaPedido(productId, weekIdx));
+    setOrClearWeekOverride(customWeeklyForecastLiters, productId, weekIdx, pronostico, getBaseDemandaPronostico(productId, weekIdx));
+
+    const prod = inventory.find(p => String(p.id) === String(productId));
+
+    if (prod && typeof window.computePMPChainForProduct === 'function') {
+        if (customInventarioInicialOverrides[productId]) {
+            customInventarioInicialOverrides[productId][weekIdx] = undefined;
+        }
+        const autoInv = window.computePMPChainForProduct(prod)[weekIdx].invInicial;
+        setOrClearWeekOverride(customInventarioInicialOverrides, productId, weekIdx, invInicial, autoInv);
+
+        if (customMpsOverrides[productId]) {
+            customMpsOverrides[productId][weekIdx] = undefined;
+        }
+        const autoPmp = window.computePMPChainForProduct(prod)[weekIdx].pmp;
+        if (pmpRaw === '') {
+            if (customMpsOverrides[productId]) {
+                const allEmpty = customMpsOverrides[productId].every(v => typeof v === 'undefined');
+                if (allEmpty) delete customMpsOverrides[productId];
+            }
+        } else {
+            const pmpVal = parseFloat(pmpRaw);
+            if (isNaN(pmpVal) || pmpVal < 0) {
+                showNotification('Ingrese un valor de PMP numérico válido mayor o igual a 0.', 'error');
+                return;
+            }
+            setOrClearWeekOverride(customMpsOverrides, productId, weekIdx, pmpVal, autoPmp);
+        }
+    } else {
+        if (!customWeeklyBarrilDemand[productId]) customWeeklyBarrilDemand[productId] = [];
+        if (!customWeeklyForecastLiters[productId]) customWeeklyForecastLiters[productId] = [];
+        if (!customInventarioInicialOverrides[productId]) customInventarioInicialOverrides[productId] = [];
+        customWeeklyBarrilDemand[productId][weekIdx] = pedido;
+        customWeeklyForecastLiters[productId][weekIdx] = pronostico;
+        customInventarioInicialOverrides[productId][weekIdx] = invInicial;
+        if (pmpRaw !== '') {
+            const pmpVal = parseFloat(pmpRaw);
+            if (isNaN(pmpVal) || pmpVal < 0) {
+                showNotification('Ingrese un valor de PMP numérico válido mayor o igual a 0.', 'error');
+                return;
+            }
+            if (!customMpsOverrides[productId]) customMpsOverrides[productId] = [];
+            customMpsOverrides[productId][weekIdx] = pmpVal;
+        }
     }
-    
-    if (!customMpsOverrides[pid]) customMpsOverrides[pid] = [undefined, undefined, undefined, undefined];
-    customMpsOverrides[pid][w] = val;
-    
+
     saveData();
-    runProductionFlow();
-    closeEditPlanningModal();
+    window._mpsMrpCalculated = true;
+    runProductionFlow(true);
+    if (typeof window.renderPMPTable === 'function') window.renderPMPTable();
+    if (typeof window.closeMpsCellEditModal === 'function') window.closeMpsCellEditModal();
+    showNotification('Datos del PMP actualizados correctamente.', 'success');
 };
 
 function renderMRP() {
@@ -1771,70 +1855,132 @@ function renderMRP() {
     if (!mrpContainer) return;
 
     const engine = window.mpsEngine;
-    const weekHeaders = [0, 1, 2, 3].map(w => getWeekLabel(getDateForWeekOffset(w)));
+    if (!engine || !engine.materiales) {
+        mrpContainer.innerHTML = '<p class="text-gray-500 italic text-sm p-4">Ejecute el cálculo MPS/MRP para ver los requerimientos de materiales.</p>';
+        return;
+    }
+
+    const weekHeaders = getPlanningWeekHeaders();
     const saborId = engine.globales.saborSeleccionado || "all";
+    const totalPmp = Object.values(engine.productos).reduce((sum, p) => sum + p.pmpLotes.reduce((a, b) => a + b, 0), 0);
+    const totalReq = Object.values(engine.materiales).reduce((sum, m) => sum + m.requerimientoBruto.reduce((a, b) => a + b, 0), 0);
+
+    const mrpOutput = document.getElementById('mrp-output');
+    if (mrpOutput) {
+        if (totalPmp > 0 && totalReq === 0) {
+            mrpOutput.innerHTML = '<p class="text-amber-700 text-sm bg-amber-50 border border-amber-200 rounded p-3"><i class="fas fa-exclamation-triangle mr-1"></i> Hay producción planificada pero no se calcularon requerimientos. Verifique que cada producto final tenga receta con ingredientes vinculados.</p>';
+        } else if (totalPmp === 0) {
+            mrpOutput.innerHTML = '<p class="text-gray-500 italic text-sm">Sin producción planificada en el MPS — los requerimientos de materiales aparecerán cuando haya lotes PMP &gt; 0.</p>';
+        } else {
+            mrpOutput.innerHTML = `<p class="text-green-700 text-sm bg-green-50 border border-green-200 rounded p-3"><i class="fas fa-check-circle mr-1"></i> MRP calculado: ${formatDecimal(totalReq)} unidades de materiales requeridas para ${formatDecimal(totalPmp)} L de producción.</p>`;
+        }
+    }
+
+    const prodTotalCells = [0, 1, 2, 3].map(w => {
+        let total = 0;
+        if (saborId === "all") {
+            total = engine.globales.produccionSemanal[w] || 0;
+        } else {
+            const prod = engine.productos[Number(saborId)] || engine.productos[saborId];
+            total = prod ? (prod.pmpLotes[w] || 0) : 0;
+        }
+        return `<td class="p-2 border text-center font-bold bg-blue-50 text-blue-900">${formatDecimal(total)} L</td>`;
+    }).join('');
 
     let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
         <thead>
+            <tr class="bg-gray-100 text-gray-700 text-xs">
+                <th class="p-2 border font-semibold text-left" colspan="2">PRODUCCIÓN TOTAL (L)</th>
+                ${prodTotalCells}
+                <th class="p-2 border bg-gray-100" colspan="2"></th>
+            </tr>
             <tr class="bg-[#1a1a2e] text-white">
-                <th class="p-2 border">Material</th>
-                <th class="p-2 border text-center bg-[#00422a]">Inv. Inicial</th>
+                <th class="p-2 border min-w-[140px]">Materia Prima</th>
+                <th class="p-2 border text-center bg-yellow-100 text-yellow-900">Stock Inicial<br><span class="text-[10px] font-normal">(kg / und)</span></th>
                 <th class="p-2 border text-center">${weekHeaders[0]}</th>
                 <th class="p-2 border text-center">${weekHeaders[1]}</th>
-                <th class="p-2 border text-center">${weekHeaders[2]}</th>
+                <th class="p-2 border text-center bg-blue-800">${weekHeaders[2]}</th>
                 <th class="p-2 border text-center">${weekHeaders[3]}</th>
+                <th class="p-2 border text-center bg-green-100 text-green-900">Stock Final<br><span class="text-[10px] font-normal">(fin mes)</span></th>
+                <th class="p-2 border text-center">Unidad<br><span class="text-[10px] font-normal">de Compra</span></th>
+                <th class="p-2 border text-center bg-yellow-100 text-yellow-900">Stock<br><span class="text-[10px] font-normal">seguridad</span></th>
             </tr>
         </thead>
         <tbody>`;
 
     Object.values(engine.materiales).forEach(mat => {
+        const unit = getMaterialUnit(mat.material);
+        const purchaseUnit = Number(mat.material.purchaseUnit) || 1;
+        const safetyStock = Number(mat.material.safetyStock) || 0;
         let cells = '';
-        let inv = mat.inventarioActual;
+        let invRoll = Number(mat.inventarioActual) || 0;
+        let reqTotalFiltro = 0;
+        const reqPorSemana = [0, 0, 0, 0];
+
         for (let w = 0; w < 4; w++) {
             let reqBruto = 0;
             if (saborId === "all") {
                 reqBruto = mat.requerimientoBruto[w];
             } else {
-                reqBruto = mat.requerimientosPorSabor[saborId] ? mat.requerimientosPorSabor[saborId][w] : 0;
+                const porSabor = mat.requerimientosPorSabor[Number(saborId)] || mat.requerimientosPorSabor[saborId];
+                reqBruto = porSabor ? porSabor[w] : 0;
             }
-            let invProyectado = mat.inventarioProyectado[w];
-            let pedLanzado = mat.pedidosLanzados[w];
-            let enDeficit = invProyectado < 0;
+            reqPorSemana[w] = reqBruto;
+            reqTotalFiltro += reqBruto;
+        }
 
-            let reqClass = reqBruto > 0 ? 'text-red-600 font-bold' : 'text-gray-500';
-            let invClass = enDeficit ? 'bg-red-100 text-red-700 font-bold' : (invProyectado <= mat.material.minStock ? 'bg-yellow-100' : '');
+        let plan;
+        if (saborId === "all") {
+            plan = {
+                req: mat.requerimientoBruto,
+                compra: mat.pedidosLanzados,
+                inv: mat.inventarioProyectado,
+                stockFinal: mat.stockFinal != null ? mat.stockFinal : mat.inventarioProyectado[3]
+            };
+        } else {
+            plan = Production.calcularPlanMRPMaterial(invRoll, reqPorSemana, safetyStock, purchaseUnit);
+        }
 
-            let aPedirEn = '';
-            if (pedLanzado > 0) {
-                let semanaLanzar = mat.semanaLanzamiento[w];
-                if (semanaLanzar >= 0) {
-                    aPedirEn = `<div class="text-[10px] text-blue-700 font-bold mt-1 bg-blue-100 rounded px-1">
-                        Pedir en Sem ${semanaLanzar + 1} (${formatDecimal(pedLanzado)} ${mat.material.unit})
-                    </div>`;
-                } else {
-                    aPedirEn = `<div class="text-[10px] text-red-700 font-bold mt-1 bg-red-200 rounded px-1">
-                        ¡PEDIR URGENTE YA! (${formatDecimal(pedLanzado)} ${mat.material.unit})
-                    </div>`;
-                }
-            }
+        for (let w = 0; w < 4; w++) {
+            const reqBruto = plan.req[w];
+            const compra = plan.compra[w];
+            const invFin = plan.inv[w];
 
-            cells += `<td class="p-2 border align-top hover:bg-gray-50">
-                <div class="flex justify-between items-center mb-1">
-                    <span class="text-xs text-gray-500">Req:</span>
+            const reqClass = reqBruto > 0 ? 'text-red-600 font-semibold' : 'text-gray-500';
+            const compraClass = compra > 0 ? 'text-blue-700 font-semibold' : 'text-gray-500';
+            const invClass = invFin < safetyStock ? 'text-amber-700 font-semibold' : 'text-gray-800 font-semibold';
+
+            cells += `<td class="p-2 border align-top hover:bg-gray-50 min-w-[110px]">
+                <div class="flex justify-between items-center mb-0.5">
+                    <span class="text-xs text-amber-700 font-semibold">Req:</span>
                     <span class="text-sm ${reqClass}">${formatDecimal(reqBruto)}</span>
                 </div>
-                <div class="flex justify-between items-center bg-gray-50 p-1 rounded">
-                    <span class="text-xs text-gray-500">Inv:</span>
-                    <span class="text-sm ${invClass}">${formatDecimal(invProyectado)}</span>
+                <div class="flex justify-between items-center mb-0.5">
+                    <span class="text-xs text-amber-700 font-semibold">Compra:</span>
+                    <span class="text-sm ${compraClass}">${formatDecimal(compra)}</span>
                 </div>
-                ${aPedirEn}
+                <div class="flex justify-between items-center bg-gray-50 p-1 rounded">
+                    <span class="text-xs text-amber-700 font-semibold">Inv:</span>
+                    <span class="text-sm ${invClass}">${formatDecimal(invFin)}</span>
+                </div>
             </td>`;
         }
 
+        const estadoRow = saborId === "all"
+            ? (mat.estadoGlobal || 'OK')
+            : (plan.compra.some(c => c > 0) ? 'Comprar' : 'OK');
+        const estadoRowClass = estadoRow === 'Comprar' ? 'text-red-700' : 'text-green-700';
+
         html += `<tr>
-            <td class="p-2 border font-semibold">${mat.material.name}</td>
-            <td class="p-2 border text-center bg-gray-50 font-bold">${formatDecimal(mat.material.quantity)}</td>
+            <td class="p-2 border font-semibold">
+                ${mat.material.name}
+                <div class="text-[10px] font-normal ${estadoRowClass} mt-0.5">Total req: ${formatDecimal(saborId === "all" ? (mat.requeridoTotal || 0) : reqTotalFiltro)} ${unit}</div>
+            </td>
+            <td class="p-2 border text-center bg-yellow-50 font-bold">${formatDecimal(mat.inventarioActual)}</td>
             ${cells}
+            <td class="p-2 border text-center bg-green-50 font-bold">${formatDecimal(plan.stockFinal)}</td>
+            <td class="p-2 border text-center">${formatDecimal(purchaseUnit)} ${unit}</td>
+            <td class="p-2 border text-center bg-yellow-50 font-bold">${formatDecimal(safetyStock)}</td>
         </tr>`;
     });
 
@@ -1947,10 +2093,25 @@ function renderKPIs() {
     });
 
 
-    const totalDemandaGeneral = demandBarrilMes + demandForecastMes || 1;
-    const pctPedidosFijos = Math.round((demandBarrilMes / totalDemandaGeneral) * 100);
-    const pctPronosticos = Math.round((demandForecastMes / totalDemandaGeneral) * 100);
-    const utilSemanas = engine.globales.utilizacionCapacidad.map((u, i) => `S${i + 1}: ${u}%`).join(' · ');
+    const totalDemandaGeneral = demandBarrilMes + demandForecastMes;
+    const pctPedidosFijos = totalDemandaGeneral > 0
+        ? Math.round((demandBarrilMes / totalDemandaGeneral) * 100)
+        : 0;
+    const pctPronosticos = totalDemandaGeneral > 0 ? (100 - pctPedidosFijos) : 0;
+
+    const weeklyProduced = [0, 0, 0, 0];
+    productosAVisualizar.forEach(prod => {
+        for (let w = 0; w < 4; w++) weeklyProduced[w] += prod.pmpLotes[w] || 0;
+    });
+    const utilSemanasArr = weeklyProduced.map((prodSemana, w) => {
+        const capSemana = (customWeeklyCapacities && customWeeklyCapacities[w]) || systemParameters.capacidadSemanalTotal || 720;
+        return capSemana > 0 ? Math.round((prodSemana / capSemana) * 1000) / 10 : 0;
+    });
+    const utilizacionGlobal = utilSemanasArr.length
+        ? Math.round((utilSemanasArr.reduce((a, b) => a + b, 0) / utilSemanasArr.length) * 10) / 10
+        : 0;
+    const utilSemanas = utilSemanasArr.map((u, i) => `S${i + 1}: ${u}%`).join(' · ');
+    const capBase = systemParameters.capacidadSemanalTotal || 720;
     const finalInventoryBottles = Math.floor(finalInventory / systemParameters.tamanoBotella);
 
     kpiContainer.innerHTML = `
@@ -1961,15 +2122,17 @@ function renderKPIs() {
         </div>
         <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
             <p class="text-xs text-blue-800 font-bold mb-1">Capacidad Utilizada</p>
-            <p class="text-2xl font-black text-blue-600">${engine.globales.utilizacionGlobal}%</p>
-            <p class="text-xs text-gray-600 mt-1">Fórmula: Producido / ${systemParameters.capacidadSemanalTotal} L</p>
+            <p class="text-2xl font-black text-blue-600">${utilizacionGlobal}%</p>
+            <p class="text-xs text-gray-600 mt-1">Promedio semanal · ${utilSemanas}</p>
+            <p class="text-xs text-gray-500">Fórmula: Producido / ${capBase} L</p>
         </div>
         <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
             <p class="text-xs text-purple-800 font-bold mb-2">Participación por Tipo</p>
             <div class="space-y-1 text-xs text-gray-700">
-                <p>Ã°Å¸â€ Âµ Pedidos fijos: ${pctPedidosFijos}%</p>
-                <p>🟢 Pronósticos: ${pctPronosticos}%</p>
+                <p><i class="fas fa-beer text-blue-600 mr-1"></i>Pedidos fijos: <strong>${pctPedidosFijos}%</strong> (${formatDecimal(demandBarrilMes)} L)</p>
+                <p><i class="fas fa-chart-line text-green-600 mr-1"></i>Pronósticos: <strong>${pctPronosticos}%</strong> (${formatDecimal(demandForecastMes)} L)</p>
             </div>
+            <p class="text-xs text-gray-500 mt-2">${totalDemandaGeneral > 0 ? `Total demanda mes: ${formatDecimal(totalDemandaGeneral)} L` : 'Sin demanda registrada en el mes'}</p>
         </div>
         <div class="flex-1 ${hasInventoryDeficit ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} p-4 rounded-lg border text-center shadow-sm">
             <p class="text-xs ${hasInventoryDeficit ? 'text-red-800' : 'text-emerald-800'} font-bold mb-1">Inv. Final Proyectado</p>
@@ -2197,8 +2360,15 @@ function editPlanningDemand(productId, weekIndex) {
 }
 
 function closeMpsCellEditModal() {
-    document.getElementById('mps-cell-edit-modal').classList.add('hidden');
-    document.getElementById('mps-cell-edit-form').reset();
+    const modal = document.getElementById('mps-cell-edit-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.add('hidden');
+    }
+    const form = document.querySelector('#mps-cell-edit-modal form');
+    if (form && typeof form.reset === 'function') form.reset();
+    const invHint = document.getElementById('mps-cell-edit-inv-hint');
+    if (invHint) invHint.classList.add('hidden');
 }
 
 function saveMpsCellEdit(event) {
@@ -2488,6 +2658,7 @@ function saveData() {
         customWeeklyOverflowLiters,
         weeklyDemandOverridesActive,
         customMpsOverrides,
+        customInventarioInicialOverrides,
         systemParameters
     };
     saveState(state);
@@ -2834,24 +3005,28 @@ function switchProductionTab(tabId) {
     const tabSemanal = document.getElementById('tab-semanal');
     const tabPlaneacion = document.getElementById('tab-planeacion');
     const tabMrp = document.getElementById('tab-mrp');
+    const tabPmp = document.getElementById('tab-pmp');
 
     const btnNueva = document.getElementById('tab-btn-nueva');
     const btnSeguimiento = document.getElementById('tab-btn-seguimiento');
     const btnSemanal = document.getElementById('tab-btn-semanal');
     const btnPlaneacion = document.getElementById('tab-btn-planeacion');
     const btnMrp = document.getElementById('tab-btn-mrp');
+    const btnPmp = document.getElementById('tab-btn-pmp');
 
     if (tabNueva) tabNueva.classList.add('hidden');
     if (tabSeguimiento) tabSeguimiento.classList.add('hidden');
     if (tabSemanal) tabSemanal.classList.add('hidden');
     if (tabPlaneacion) tabPlaneacion.classList.add('hidden');
     if (tabMrp) tabMrp.classList.add('hidden');
+    if (tabPmp) tabPmp.classList.add('hidden');
 
     if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSeguimiento) btnSeguimiento.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnMrp) btnMrp.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
+    if (btnPmp) btnPmp.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
 
     if (tabId === 'nueva') {
         if (tabNueva) tabNueva.classList.remove('hidden');
@@ -2873,6 +3048,11 @@ function switchProductionTab(tabId) {
     } else if (tabId === 'mrp') {
         if (tabMrp) tabMrp.classList.remove('hidden');
         if (btnMrp) btnMrp.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
+        runProductionFlow(true);
+    } else if (tabId === 'pmp') {
+        if (tabPmp) tabPmp.classList.remove('hidden');
+        if (btnPmp) btnPmp.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
+        if (typeof window.renderPMPTable === 'function') window.renderPMPTable();
     }
 }
 
@@ -3304,13 +3484,6 @@ function saveDemandEdit(event) {
 window.saveDemandEdit = saveDemandEdit;
 
 function renderWeeklyProductionTab() {
-    const productionContainer = document.getElementById('weekly-production-table');
-    const forecastContainer = document.getElementById('forecast-adjustment-table');
-    const historyEditor = document.getElementById('weekly-production-history-editor');
-    if (!productionContainer || !forecastContainer || !historyEditor) return;
-
-    renderWeeklyDemandAdjustment();
-
     const modeSelect = document.getElementById('week-mode-select');
     if (modeSelect) {
         modeSelect.value = weekCalculationMode;
@@ -3319,6 +3492,11 @@ function renderWeeklyProductionTab() {
     updateWeeklyProductionProductSelect();
     updateWeeklyEditTankSelect();
     updateWeeklyLitersSplitPreview();
+    renderWeeklyDemandAdjustment();
+
+    const productionContainer = document.getElementById('weekly-production-table');
+    const forecastContainer = document.getElementById('forecast-adjustment-table');
+    const historyEditor = document.getElementById('weekly-production-history-editor');
 
     const weeklyMap = {};
     productionHistory.forEach(hist => {
@@ -3334,6 +3512,7 @@ function renderWeeklyProductionTab() {
 
     const weeklyRows = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week) || a.productName.localeCompare(b.productName));
 
+    if (productionContainer) {
     if (weeklyRows.length === 0) {
         productionContainer.innerHTML = '<p class="text-gray-500 italic p-4">No hay producciones terminadas registradas para mostrar por semana.</p>';
     } else {
@@ -3359,6 +3538,7 @@ function renderWeeklyProductionTab() {
         });
         html += '</tbody></tr>';
         productionContainer.innerHTML = html;
+    }
     }
 
     const weeklyEntries = productionHistory.map(hist => {
@@ -3386,6 +3566,7 @@ function renderWeeklyProductionTab() {
         };
     });
 
+    if (historyEditor) {
     if (weeklyEntries.length === 0) {
         historyEditor.innerHTML = '<p class="text-gray-500 italic p-4">No hay registros de producción histórica para editar.</p>';
     } else {
@@ -3421,6 +3602,7 @@ function renderWeeklyProductionTab() {
         });
         html += '</tbody></table>';
         historyEditor.innerHTML = html;
+    }
     }
 
     renderForecastAdjustmentTable(forecastContainer);

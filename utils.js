@@ -45,14 +45,19 @@ export function getRelativeWeekLabel(dateStr) {
     const d = new Date(`${dateStr}T00:00:00`);
     if (isNaN(d)) return 'Sin semana';
 
-    let minDate = d;
+    let minDate = null;
     if (window.productionHistory && window.productionHistory.length > 0) {
         window.productionHistory.forEach(hist => {
             const histDate = new Date(`${hist.startDate || hist.endDate}T00:00:00`);
-            if (!isNaN(histDate) && histDate < minDate) {
+            if (!isNaN(histDate) && (!minDate || histDate < minDate)) {
                 minDate = histDate;
             }
         });
+    }
+
+    // Sin historial: anclar al inicio del horizonte de planeación (semana 0)
+    if (!minDate) {
+        minDate = new Date(`${getDateForWeekOffset(0)}T00:00:00`);
     }
 
     const minDateAligned = new Date(minDate);
@@ -64,6 +69,19 @@ export function getRelativeWeekLabel(dateStr) {
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     const weekNumber = Math.floor(diffDays / 7) + 1;
     return `Semana ${weekNumber}`;
+}
+
+/** Etiqueta de columna para tablas MPS/MRP (horizonte de 4 semanas). */
+export function getPlanningWeekLabel(weekIndex) {
+    const mode = window.weekCalculationMode || 'month';
+    if (mode === 'relative') {
+        return `Semana ${weekIndex + 1}`;
+    }
+    return getWeekLabel(getDateForWeekOffset(weekIndex));
+}
+
+export function getPlanningWeekHeaders() {
+    return [0, 1, 2, 3].map(w => getPlanningWeekLabel(w));
 }
 
 export function getWeekLabel(dateStr) {

@@ -1,0 +1,213 @@
+<!-- 
+    EJEMPLO DE INTEGRACIÓN: Fragmento de código para Index.html
+    
+    Este archivo muestra EXACTAMENTE cómo reemplazar la sección MPS
+    en tu Index.html para usar la tabla interactiva del PMP
+-->
+
+<!-- 
+    PASO 1: Añade esto en el <head> de Index.html
+    (después de los otros <link> de CSS)
+-->
+
+<link rel="stylesheet" href="pmp-interactive-styles.css">
+
+<!-- 
+    ===================================================
+    PASO 2: En la sección <body>, reemplaza el contenido
+    del tab-planeacion (aproximadamente línea 461)
+    por esto:
+    ===================================================
+-->
+
+<div id="tab-planeacion" class="hidden fade-in">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold text-[#005B3A]">
+            <i class="fas fa-calendar-alt"></i> Planeación MPS a 4 Semanas
+        </h2>
+        <div class="flex items-center space-x-3">
+            <select id="flavor-select" onchange="cambiarSaborGlobal(this.value)" 
+                    class="p-2 border border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 font-bold text-green-800 bg-green-50 shadow-sm cursor-pointer">
+                <option value="all">Todas las Cervezas (Global)</option>
+            </select>
+            <button onclick="runProductionFlow(true)" 
+                    class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded font-bold shadow-md">
+                <i class="fas fa-play mr-2"></i> Ejecutar Cálculo MPS/MRP
+            </button>
+            <!-- Nuevos botones para el PMP interactivo -->
+            <button onclick="window.pmpInteractiveTable?.exportToCSV()" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold shadow-md">
+                <i class="fas fa-download mr-2"></i> Exportar CSV
+            </button>
+            <button onclick="window.pmpInteractiveTable?.saveToStorage()" 
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold shadow-md">
+                <i class="fas fa-save mr-2"></i> Guardar Datos
+            </button>
+        </div>
+    </div>
+    
+    <div id="production-output" class="mb-4">
+        <p class="text-gray-500 italic text-sm">
+            Edita las celdas verdes (Pedido, Pronóstico, Inventario Inicial)
+            y observa cómo se calculan automáticamente el PMP e Inventario Final.
+        </p>
+    </div>
+    
+    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mb-6 overflow-x-auto">
+        <h3 class="text-lg font-bold mb-3 text-gray-700">
+            <i class="fas fa-chart-bar mr-2"></i>Programa Maestro de Producción (PMP) - Tabla Interactiva
+        </h3>
+        
+        <!-- INFORMACIÓN: Cómo funciona la tabla -->
+        <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 rounded">
+            <p class="text-sm text-blue-900">
+                <strong>Celdas en verde:</strong> Edita estos valores (Pedido, Pronóstico, Inv. Inicial)<br>
+                <strong>Celdas en amarillo:</strong> Se calculan automáticamente (PMP, Inv. Final)<br>
+                <strong>Lógica:</strong> Si (Pedido + Pronóstico) ≤ Inv. Inicial → PMP = 0, sino PMP = 120L
+            </p>
+        </div>
+        
+        <!-- CONTENEDOR: Aquí se renderiza la tabla -->
+        <div id="mps-table-container"></div>
+    </div>
+
+    <div id="production-summary-area" class="grid gap-4 mb-6">
+        <div class="grid grid-cols-1 xl:grid-cols-1 gap-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                <h3 class="text-lg font-bold mb-3 text-gray-700">
+                    Resumen demanda solicitada por semana
+                </h3>
+                <div id="production-demand-table"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6" id="kpi-container"></div>
+</div>
+
+<!-- 
+    ===================================================
+    PASO 3: Añade esto ANTES de </body> en Index.html
+    ===================================================
+-->
+
+<!-- Script de integración del PMP interactivo -->
+<script src="pmp-integration.js"></script>
+
+<!-- Script global para manejo de funciones PMP -->
+<script>
+    /**
+     * Hook para cuando el tab-planeacion se abre
+     * Sincroniza datos si es necesario
+     */
+    function onShowPMPTab() {
+        if (window.pmpInteractiveTable) {
+            console.log('[PMP] Tab planeación visible');
+            // Opcionalmente: sincronizar datos con el sistema MPS
+            // window.syncPMPtoMPS();
+        }
+    }
+
+    /**
+     * Exporta los datos PMP y los sincroniza con el sistema MPS
+     */
+    function exportPMPDataToMPS() {
+        if (window.pmpInteractiveTable) {
+            const pmpData = window.pmpInteractiveTable.getData();
+            console.log('[PMP Export] Datos exportados:', pmpData);
+            
+            // Sincronizar con sistema MPS existente si está disponible
+            if (window.mpsEngine) {
+                console.log('[PMP Export] Sincronizando con mpsEngine');
+                // Aquí va la lógica de sincronización específica
+            }
+            
+            return pmpData;
+        }
+        return null;
+    }
+
+    /**
+     * Obtiene resumen de una semana específica
+     */
+    function getPMPWeekSummary(weekNumber) {
+        if (window.pmpInteractiveTable) {
+            return window.pmpInteractiveTable.getWeekSummary(weekNumber - 1);
+        }
+        return null;
+    }
+
+    /**
+     * Reinicia la tabla PMP
+     */
+    function resetPMPTable() {
+        if (window.pmpInteractiveTable) {
+            if (confirm('¿Reiniciar la tabla PMP? Esta acción no se puede deshacer.')) {
+                window.pmpInteractiveTable.reset();
+                console.log('[PMP] Tabla reiniciada');
+            }
+        }
+    }
+</script>
+
+<!-- 
+    NOTA IMPORTANTE:
+    
+    Si ya tienes un script showSection() definido en tu código,
+    asegúrate de que llame a onShowPMPTab() cuando se abra
+    la sección de planeación:
+    
+    function showSection(sectionId) {
+        // Tu lógica existente...
+        if (sectionId === 'produccion') {
+            const tab = document.getElementById('tab-planeacion');
+            if (tab && !tab.classList.contains('hidden')) {
+                onShowPMPTab();
+            }
+        }
+    }
+-->
+
+<!-- 
+    ===================================================
+    ARCHIVOS REQUERIDOS EN LA MISMA CARPETA:
+    ===================================================
+    
+    ✓ pmp-interactive.js (clase principal)
+    ✓ pmp-interactive-styles.css (estilos)
+    ✓ pmp-integration.js (integración automática)
+    
+    ===================================================
+    ESTRUCTURA ESPERADA EN Index.html:
+    ===================================================
+    
+    Asegúrate de que en tu Index.html exista:
+    
+    1. <div id="mps-table-container"></div>
+       - Este es el contenedor donde se renderiza la tabla
+       - Generalmente está en la sección tab-planeacion
+    
+    2. El script de pmp-integration.js lo detecará automáticamente
+       y renderizará la tabla al cargar la página
+    
+    ===================================================
+    PRUEBA RÁPIDA:
+    ===================================================
+    
+    En la consola del navegador (F12), prueba:
+    
+    // Ver si la tabla está inicializada
+    console.log(window.pmpInteractiveTable);
+    
+    // Obtener datos actuales
+    console.log(window.pmpInteractiveTable.getData());
+    
+    // Exportar a CSV
+    window.pmpInteractiveTable.exportToCSV();
+    
+    // Guardar datos
+    window.pmpInteractiveTable.saveToStorage();
+    
+    // Obtener resumen de semana 1
+    console.log(window.pmpInteractiveTable.getWeekSummary(0));
+-->

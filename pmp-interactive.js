@@ -72,12 +72,16 @@ export class PMPInteractiveTable {
         // Demanda = máximo entre pedido y pronóstico
         const demanda = Math.max(pedido, pronostico);
 
-        // PMP: Si (Pedido + Pronóstico) <= Inv. Inicial, entonces 0, sino 120
+        // PMP según necesidad real y tamaños de lote (80 L mínimo, 120 L tanque)
         const sumaPedidoPronostico = pedido + pronostico;
-        row.pmp = (sumaPedidoPronostico <= inventarioInicial) ? this.PMP_MINIMUM : this.PMP_PRODUCTION;
+        const necesidadReal = Math.max(0, sumaPedidoPronostico - inventarioInicial);
+        const loteMinimo = 80;
+        if (necesidadReal <= 0) row.pmp = 0;
+        else if (necesidadReal <= loteMinimo) row.pmp = loteMinimo;
+        else row.pmp = this.PMP_PRODUCTION;
 
-        // Inventario Final = Inv. Inicial - PMP - Demanda
-        row.inventarioFinal = inventarioInicial - row.pmp - demanda;
+        // Inventario Final = Inv. Inicial + PMP - Demanda
+        row.inventarioFinal = inventarioInicial + row.pmp - demanda;
 
         return row;
     }

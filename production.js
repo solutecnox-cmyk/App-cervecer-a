@@ -116,7 +116,166 @@ export function calcularProduccionNecesaria(demanda, inventarioActual) {
     return Math.max(0, demanda - inventarioActual);
 }
 
-// --- 13. REQUERIMIENTO DE MATERIA PRIMA ---
+/**
+ * Calcula litros de PMP según necesidad real y tamaños de lote.
+ * Regla: 0 si no hay déficit; lote mínimo (80 L) si necesidad ≤ 80;
+ * tanque completo (120 L) si necesidad ≤ 120; múltiples lotes si excede.
+ */
+export function calcularLotesPMP(necesidadReal, params) {
+    const loteMinimo = (params && params.loteMinimo) ?? (window.systemParameters && window.systemParameters.loteMinimo) ?? 80;
+    const capacidadTanque = (params && params.capacidadTanque) ?? (window.systemParameters && window.systemParameters.capacidadTanque) ?? 120;
+    const need = Number(necesidadReal) || 0;
+    if (need <= 0) return 0;
+    if (need <= loteMinimo) return loteMinimo;
+    if (need <= capacidadTanque) return capacidadTanque;
+
+    const lotesCompletos = Math.floor(need / capacidadTanque);
+    const remainder = need % capacidadTanque;
+    let extra = 0;
+    if (remainder > 0) {
+        extra = remainder <= loteMinimo ? loteMinimo : capacidadTanque;
+    }
+    return (lotesCompletos * capacidadTanque) + extra;
+}
+
+export function calcularPMPDesdeDemanda(demanda, invInicial, params) {
+    const necesidadReal = Math.max(0, (Number(demanda) || 0) - (Number(invInicial) || 0));
+    return calcularLotesPMP(necesidadReal, params);
+}
+
+// --- 13. REQUERIMIENTO DE MATERIA PRIMA (MRP) ---
+/**
+ * Cantidad base de ingrediente para un lote estándar (ej. 120 L).
+ * Soporta qtyForBatch (Excel) o qtyPerUnit legacy (cantidad por litro).
+ */
+export function obtenerCantidadBaseReceta(ingredient, litrosPorLote) {
+    const lote = Number(litrosPorLote) || (window.systemParameters && window.systemParameters.capacidadTanque) || 120;
+    if (ingredient == null) return 0;
+    if (ingredient.qtyForBatch != null && ingredient.qtyForBatch !== '') {
+        return Number(ingredient.qtyForBatch) || 0;
+    }
+    if (ingredient.qtyPerBatch != null && ingredient.qtyPerBatch !== '') {
+        return Number(ingredient.qtyPerBatch) || 0;
+    }
+    if (ingredient.qtyPerUnit != null && ingredient.qtyPerUnit !== '') {
+        return (Number(ingredient.qtyPerUnit) || 0) * lote;
+    }
+    return 0;
+}
+
+/** ingredientePorLitro = cantidadBase / litrosPorLote */
+export function calcularRequerimientoPorLitro(cantidadBaseLote, litrosPorLote) {
+    const lote = Number(litrosPorLote) || (window.systemParameters && window.systemParameters.capacidadTanque) || 120;
+    const base = Number(cantidadBaseLote) || 0;
+    if (lote <= 0) return 0;
+    return base / lote;
+}
+
+/** materialNecesario = (cantidadBase / litrosPorLote) × PMP */
+export function calcularRequerimientoMaterialDesdeReceta(cantidadBaseLote, pmpLitros, litrosPorLote) {
+    const porLitro = calcularRequerimientoPorLitro(cantidadBaseLote, litrosPorLote);
+    return porLitro * (Number(pmpLitros) || 0);
+}
+
+/**
+ * MRP consolidado para un conjunto de productos y sus PMP.
+ * pmpPorProducto: { [productId]: litros }
+ * inventarioMP: { [materialId]: cantidad disponible }
+ */
+export function calcularMRP(pmpPorProducto, recipesList, inventarioMP, litrosPorLote) {
+    const lote = Number(litrosPorLote) || (window.systemParameters && window.systemParameters.capacidadTanque) || 120;
+    const acumulado = {};
+
+    Object.entries(pmpPorProducto || {}).forEach(([productId, pmp]) => {
+        const pmpNum = Number(pmp) || 0;
+        if (pmpNum <= 0) return;
+        const recipe = (recipesList || []).find(r => Number(r.productId) === Number(productId));
+        if (!recipe || !Array.isArray(recipe.ingredients)) return;
+
+        recipe.ingredients.forEach(ing => {
+            const matId = Number(ing.ingredientProductId);
+            const base = obtenerCantidadBaseReceta(ing, lote);
+            const requerido = calcularRequerimientoMaterialDesdeReceta(base, pmpNum, lote);
+            if (!acumulado[matId]) acumulado[matId] = 0;
+            acumulado[matId] += requerido;
+        });
+    });
+
+    const materiales = {};
+    Object.entries(acumulado).forEach(([matId, requerido]) => {
+        const disponible = Number(inventarioMP && inventarioMP[matId]) || 0;
+        const faltante = Math.max(0, requerido - disponible);
+        materiales[matId] = {
+            requerido,
+            disponible,
+            faltante,
+            estado: faltante > 0 ? 'Comprar' : 'OK'
+        };
+    });
+
+    return materiales;
+}
+
+/**
+ * Cantidad a comprar según lógica Excel MRP:
+ * - Semana 1 con producción: requerimiento en múltiplos de unidad de compra.
+ * - Semanas 2–4: repone stock de seguridad si el inventario proyectado cae por debajo.
+ * - Unidad de compra ≤ 1 (lúpulo, levadura): al reponer, cubre al menos el req semanal.
+ */
+export function calcularCompraMRP(inv, req, safetyStock, purchaseUnit, weekIndex) {
+    const pu = Math.max(Number(purchaseUnit) || 1, 0.0001);
+    const safety = Number(safetyStock) || 0;
+    const r = Math.max(Number(req) || 0, 0);
+    const stock = Number(inv) || 0;
+
+    if (r <= 0 && stock >= safety) return 0;
+
+    const projected = stock - r;
+
+    if (weekIndex === 0 && r > 0) {
+        return Math.ceil(r / pu) * pu;
+    }
+
+    if (projected >= safety) return 0;
+
+    const deficit = safety - projected;
+    let toBuy = deficit;
+
+    if (r > 0 && pu <= 1) {
+        toBuy = Math.max(deficit, r);
+    }
+
+    return Math.ceil(toBuy / pu) * pu;
+}
+
+/**
+ * Proyecta Req / Compra / Inv para 4 semanas de un material.
+ * Inv fin semana = Inv ini − Req + Compra
+ */
+export function calcularPlanMRPMaterial(stockInicial, reqPorSemana, safetyStock, purchaseUnit) {
+    const result = {
+        req: [],
+        compra: [],
+        inv: [],
+        invInicialSemana: [],
+        stockFinal: 0
+    };
+    let inv = Number(stockInicial) || 0;
+
+    for (let w = 0; w < 4; w++) {
+        result.invInicialSemana.push(inv);
+        const req = Number(reqPorSemana[w]) || 0;
+        const compra = calcularCompraMRP(inv, req, safetyStock, purchaseUnit, w);
+        inv = inv - req + compra;
+        result.req.push(req);
+        result.compra.push(compra);
+        result.inv.push(inv);
+    }
+
+    result.stockFinal = inv;
+    return result;
+}
+
 /**
  * Calcula el requerimiento bruto de un ingrediente según los lotes producidos.
  * Fórmula Excel: =Lotes*Consumo_Por_Lote
@@ -188,6 +347,75 @@ export function calcularCostoTotal(materiales, manoObra, otrosCostos) {
     return materiales + manoObra + otrosCostos;
 }
 
+export function computePMPChainForProduct(prod) {
+  var id = prod.id;
+  var chain = [];
+  var prevInvFinal = 0;
+
+  function getOv(map, w) {
+    if (!map) return 0;
+    var row = map[id] || map[String(id)];
+    if (!row) return 0;
+    return Number(row[w]) || 0;
+  }
+
+  function hasOv(map, w) {
+    if (!map) return false;
+    var row = map[id] || map[String(id)];
+    return row && row[w] !== undefined && row[w] !== null;
+  }
+
+  function resolveDemand(w) {
+    var pedido = getOv(window.customWeeklyBarrilDemand, w);
+    var pronostico = getOv(window.customWeeklyForecastLiters, w);
+    var engineProd = window.mpsEngine && window.mpsEngine.productos && window.mpsEngine.productos[id];
+    if (!hasOv(window.customWeeklyBarrilDemand, w) && engineProd) {
+      pedido = engineProd.demandaPedidos[w] || 0;
+    }
+    if (!hasOv(window.customWeeklyForecastLiters, w) && engineProd) {
+      pronostico = engineProd.demandaPronostico[w] || 0;
+    }
+    return { pedido: pedido, pronostico: pronostico };
+  }
+
+  function calcCell(pedido, pronostico, invInicial, wi) {
+    var demanda = pedido + pronostico;
+    var pmp = calcularPMPDesdeDemanda(demanda, invInicial);
+    if (window.customMpsOverrides && window.customMpsOverrides[id] && window.customMpsOverrides[id][wi] !== undefined) {
+      pmp = Number(window.customMpsOverrides[id][wi]) || 0;
+    }
+    var invFinal = invInicial + pmp - demanda;
+    return { pmp: pmp, invFinal: invFinal };
+  }
+
+  for (var wi = 0; wi < 4; wi++) {
+    var demand = resolveDemand(wi);
+    var pedido = demand.pedido;
+    var pronostico = demand.pronostico;
+    var invInicial;
+    if (hasOv(window.customInventarioInicialOverrides, wi)) {
+      invInicial = getOv(window.customInventarioInicialOverrides, wi);
+    } else if (wi === 0) {
+      var vol = (prod.volumePerUnit && prod.volumePerUnit > 0) ? prod.volumePerUnit : 1;
+      invInicial = (prod.quantity || 0) * vol;
+    } else {
+      invInicial = prevInvFinal;
+    }
+    var res = calcCell(pedido, pronostico, invInicial, wi);
+    chain.push({
+      weekIndex: wi,
+      pedido: pedido,
+      pronostico: pronostico,
+      invInicial: invInicial,
+      pmp: res.pmp,
+      invFinal: res.invFinal,
+      invInicialIsChained: wi > 0 && !hasOv(window.customInventarioInicialOverrides, wi)
+    });
+    prevInvFinal = res.invFinal;
+  }
+  return chain;
+}
+
 export function renderPMPTable(containerId) {
   if (containerId === undefined) containerId = 'pmp-table-container';
   var container = document.getElementById(containerId);
@@ -206,20 +434,6 @@ export function renderPMPTable(containerId) {
   }
 
   var capacidadLote = (window.systemParameters && window.systemParameters.capacidadTanque) || 120;
-
-  function getOv(map, id, w) {
-    if (!map) return 0;
-    var row = map[id] || map[String(id)];
-    if (!row) return 0;
-    return Number(row[w]) || 0;
-  }
-
-  function calcCell(pedido, pronostico, invInicial) {
-    var demanda = pedido + pronostico;
-    var pmp = demanda <= invInicial ? 0 : capacidadLote;
-    var invFinal = invInicial - pmp - demanda;
-    return { pmp: pmp, invFinal: invFinal };
-  }
 
   function wLabel(w) {
     try {
@@ -265,20 +479,20 @@ export function renderPMPTable(containerId) {
       (prod.sku ? '<div style="font-size:10px;color:#9ca3af;padding-left:16px;">' + prod.sku + '</div>' : '') +
       '</td>';
 
+    var chain = computePMPChainForProduct(prod);
+
     for (var wi = 0; wi < 4; wi++) {
-      var pedido     = getOv(window.customWeeklyBarrilDemand, id, wi);
-      var pronostico = getOv(window.customWeeklyForecastLiters, id, wi);
-      var invInicial = getOv(window.customInventarioInicialOverrides, id, wi);
-      if (invInicial === 0 && wi === 0) {
-        var vol = (prod.volumePerUnit && prod.volumePerUnit > 0) ? prod.volumePerUnit : 1;
-        invInicial = (prod.quantity || 0) * vol;
-      }
-      var res = calcCell(pedido, pronostico, invInicial);
-      var pmp     = res.pmp;
-      var invFinal = res.invFinal;
+      var week = chain[wi];
+      var pedido = week.pedido;
+      var pronostico = week.pronostico;
+      var invInicial = week.invInicial;
+      var pmp = week.pmp;
+      var invFinal = week.invFinal;
 
       var pmpStyle    = pmp > 0 ? 'font-weight:700;color:#047857;background:#ecfdf5;' : 'color:#9ca3af;background:#fefce8;';
       var invFStyle   = invFinal < 0 ? 'font-weight:700;color:#b91c1c;background:#fef2f2;' : 'font-weight:600;color:#92400e;background:#fffbeb;';
+      var invIStyle   = week.invInicialIsChained ? 'font-weight:600;color:#6d28d9;font-style:italic;' : 'font-weight:600;color:#6d28d9;';
+      var invTitle    = week.invInicialIsChained ? 'Inv. Final semana anterior (autom\u00e1tico) \u2014 clic para editar' : 'Clic para editar inventario inicial';
       var onclick     = 'onclick="window.editMPS(' + id + ',' + wi + ')"';
 
       var fmt = function(n) { return n % 1 === 0 ? String(n) : n.toFixed(1); };
@@ -290,8 +504,8 @@ export function renderPMPTable(containerId) {
           onclick + ' title="Clic para editar pron\u00f3stico" onmouseenter="this.style.background=\'#dbeafe\'" onmouseleave="this.style.background=\'#eff6ff\'">' +
           '<span style="font-weight:600;color:#1d4ed8;">' + fmt(pronostico) + '</span></td>' +
         '<td class="border border-gray-200 p-1 text-center cursor-pointer" style="background:#faf5ff;" ' +
-          onclick + ' title="Clic para editar inventario inicial" onmouseenter="this.style.background=\'#ede9fe\'" onmouseleave="this.style.background=\'#faf5ff\'">' +
-          '<span style="font-weight:600;color:#6d28d9;">' + fmt(invInicial) + '</span></td>' +
+          onclick + ' title="' + invTitle + '" onmouseenter="this.style.background=\'#ede9fe\'" onmouseleave="this.style.background=\'#faf5ff\'">' +
+          '<span style="' + invIStyle + '">' + fmt(invInicial) + '</span></td>' +
         '<td class="border border-gray-200 p-1 text-center"><span style="' + pmpStyle + '">' + pmp + '</span></td>' +
         '<td class="border border-gray-200 p-1 text-center"><span style="' + invFStyle + '">' + fmt(invFinal) + '</span></td>';
     }
@@ -304,9 +518,11 @@ export function renderPMPTable(containerId) {
     '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#bbf7d0;margin-right:4px;"></span>' +
     'Pedido / Pron\u00f3stico / Inv. Ini. \u2014 clic para editar</span>' +
     '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#fef08a;margin-right:4px;"></span>' +
-    'PMP = 0 si demanda \u2264 Inv. Ini.; si no, PMP = ' + capacidadLote + ' L</span>' +
+    'PMP = 0 si demanda \u2264 Inv. Ini.; si no, lote m\u00edn. ' + ((window.systemParameters && window.systemParameters.loteMinimo) || 80) + ' L o tanque ' + capacidadLote + ' L seg\u00fan necesidad</span>' +
     '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#fecaca;margin-right:4px;"></span>' +
-    'Inv. Final = Inv. Ini. \u2212 PMP \u2212 (Pedido + Pron\u00f3stico)</span>' +
+    'Inv. Final = Inv. Ini. + PMP \u2212 (Pedido + Pron\u00f3stico)</span>' +
+    '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ddd6fe;margin-right:4px;"></span>' +
+    'Sem. 2+ Inv. Ini. = Inv. Final de la semana anterior</span>' +
     '</span></td></tr>';
 
   html += '</tbody></table></div>';
@@ -341,7 +557,7 @@ export function validarCapacidad(produccion, capacidad) {
 /**
  * Consolida la suma de requerimientos netos.
  */
-export function calcularMRP(requerimientos) {
+export function sumarRequerimientosMRP(requerimientos) {
     return requerimientos.reduce((acc, valor) => acc + valor, 0);
 }
 

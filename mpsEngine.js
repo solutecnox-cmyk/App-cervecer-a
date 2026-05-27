@@ -1,4 +1,6 @@
 // mpsEngine.js – central data and calculation for PMP
+import { calcularPMPDesdeDemanda } from './production.js';
+
 export const mpsEngine = {
   productos: {}, // populated from state.inventoryFinal (or other source)
   // Initialize with existing product data
@@ -21,8 +23,8 @@ export const mpsEngine = {
     const pedido = overrides.pedido ?? prod.demandaPedidos[weekIdx] ?? 0;
     const pronostico = overrides.pronostico ?? prod.demandaPronostico[weekIdx] ?? 0;
     const demanda = pedido + pronostico;
-    const pmp = demanda <= invInicial ? 0 : 120; // constant can be parameterised later
-    const inventarioFinal = invInicial - pmp - demanda;
+    const pmp = calcularPMPDesdeDemanda(demanda, invInicial);
+    const inventarioFinal = invInicial + pmp - demanda;
     return { pedido, pronostico, inventarioInicial: invInicial, pmp, inventarioFinal };
   }
 };

@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestión - Cervecería</title>
+    <link rel="icon" href="logo.png" type="image/png">
+    <script>
+        // Suppress Tailwind CSS CDN production warning
+        (function() {
+            const origWarn = console.warn;
+            console.warn = function(...args) {
+                if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) {
+                    return;
+                }
+                origWarn.apply(console, args);
+            };
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #print-area, #print-area * {
+                visibility: visible;
+            }
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        .warehouse-visual {
+            position: relative;
+            background: linear-gradient(145deg, #f3f4f6, #e5e7eb);
+            border-radius: 12px;
+            padding: 12px;
+            width: 120px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .warehouse-visual:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .warehouse-door {
+            background: #8b5a2b;
+            width: 60px;
+            height: 70px;
+            margin: 8px auto;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        .warehouse-door::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 20px;
+            background: #d4a017;
+            border-radius: 2px;
+        }
+        .batch-tooltip {
+            visibility: hidden;
+            background-color: #1f2937;
+            color: #fff;
+            text-align: left;
+            border-radius: 8px;
+            padding: 8px 12px;
+            position: absolute;
+            z-index: 20;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            width: auto;
+            min-width: 180px;
+            white-space: normal;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .warehouse-visual:hover .batch-tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .section {
+            display: none;
+        }
+        .section.active {
+            display: block;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .editable {
+            cursor: pointer;
+            border-bottom: 1px dashed #9ca3af;
+        }
+    </style>
+    <script>
+        window.editMPS = function editMPS(productoId, weekIndex, currentVal) {
+            // Usar la versión mejorada
+            window.editMPS_Enhanced(productoId, weekIndex);
+        };
+    </script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans antialiased">
+
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-[#005B3A] text-white p-6 flex flex-col">
+            <div class="text-2xl font-bold mb-8 flex items-center">
+                <img src="logo.png" alt="Logo B&E" class="h-12 w-auto mr-3 bg-white rounded p-1" onerror="this.style.display='none'">
+                B&E Cervecería
+            </div>
+            <nav class="flex-1">
+                <ul class="space-y-2">
+                    <li>
+                        <button onclick="showSection('inventario')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-boxes mr-3"></i> Gestión de Inventario
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="showSection('clientes')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-users mr-3"></i> Gestión de Clientes
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="showSection('proveedores')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-truck mr-3"></i> Gestión de Proveedores
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="showSection('produccion')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-industry mr-3"></i> Dashboard Producción
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="showSection('parametros')" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] transition-colors flex items-center">
+                            <i class="fas fa-cogs mr-3"></i> Parámetros Generales
+                        </button>
+                    </li>
+                </ul>
+            </nav>
+            <div class="mt-8 pt-6 border-t border-[#004b30]">
+                <button onclick="confirmResetSampleData()" class="w-full text-left py-2 px-4 rounded hover:bg-[#00422a] text-xs text-green-200 hover:text-white transition-colors flex items-center">
+                    <i class="fas fa-database mr-3"></i> Cargar Datos de Ejemplo
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-8 overflow-y-auto">
+            <div class="flex justify-end mb-6">
+                <button id="notification-bell" onclick="openNotificationsModal()" class="relative inline-flex items-center px-4 py-2 rounded-full bg-yellow-500 text-white hover:bg-yellow-600 transition-colors shadow">
+                    <i class="fas fa-bell"></i>
+                    <span class="ml-2 hidden sm:inline">Alertas</span>
+                    <span id="notification-bell-count" class="absolute top-0 right-0 -mt-1 -mr-1 inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full hidden">0</span>
+                </button>
+            </div>
+
+            <!-- Sección de Inventario -->
+            <section id="inventario" class="section fade-in">
+                <div class="flex justify-between items-center mb-6 gap-3 flex-wrap">
+                    <h1 class="text-3xl font-bold text-gray-700">Gestión de Inventario</h1>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="openAddProductModal('final')" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] transition-colors">
+                            <i class="fas fa-plus-circle"></i> Añadir Producto Final
+                        </button>
+                        <button onclick="openAddProductModal('raw')" class="bg-amber-600 text-white px-4 py-2 rounded-md hover:bg-amber-700 transition-colors">
+                            <i class="fas fa-seedling"></i> Añadir Materia Prima
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <!-- Inventario para Ventas -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <h2 class="text-xl font-bold p-4 bg-gray-100 text-[#005B3A] border-b"><i class="fas fa-beer mr-2"></i> Inventario para Ventas (Productos Finales)</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="p-3">SKU</th>
+                                        <th class="p-3">Nombre</th>
+                                        <th class="p-3">Stock</th>
+                                        <th class="p-3">Unidad</th>
+                                        <th class="p-3">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-final-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Control de Materia Prima -->
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <h2 class="text-xl font-bold p-4 bg-gray-100 text-amber-700 border-b"><i class="fas fa-seedling mr-2"></i> Control de Materia Prima (Producción)</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="p-3">SKU</th>
+                                        <th class="p-3">Nombre</th>
+                                        <th class="p-3">Stock</th>
+                                        <th class="p-3">Unidad</th>
+                                        <th class="p-3">Mín. Alerta</th>
+                                        <th class="p-3">Proveedor</th>
+                                        <th class="p-3">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-raw-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sección de Clientes -->
+            <section id="clientes" class="section fade-in">
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-3xl font-bold text-gray-700">Gestión de Clientes</h1>
+                    <button onclick="openAddClientModal()" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] transition-colors">
+                        <i class="fas fa-user-plus"></i> Registrar Nuevo Cliente
+                    </button>
+                </div>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-200">
+                            <tr>
+                                <th class="p-4">NIT / DV</th>
+                                <th class="p-4">Razón Social</th>
+                                <th class="p-4">Nombre Comercial</th>
+                                <th class="p-4">Ciudad</th>
+                                <th class="p-4">Correo</th>
+                                <th class="p-4">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-table-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Sección de Proveedores -->
+            <section id="proveedores" class="section fade-in">
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-3xl font-bold text-gray-700">Gestión de Proveedores</h1>
+                    <button onclick="openAddSupplierModal()" class="bg-[#005B3A] text-white px-4 py-2 rounded-md hover:bg-[#00422a] transition-colors">
+                        <i class="fas fa-truck-loading"></i> Registrar Proveedor
+                    </button>
+                </div>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-200">
+                            <tr>
+                                <th class="p-4">NIT / Cédula</th>
+                                <th class="p-4">Tipo</th>
+                                <th class="p-4">Nombre / Razón Social</th>
+                                <th class="p-4">Teléfono</th>
+                                <th class="p-4">Correo</th>
+                                <th class="p-4">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppliers-table-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Dashboard de Producción y Bodegas -->
+            <section id="produccion" class="section active fade-in">
+                <div class="flex justify-between items-center mb-6">
+                    <h1 class="text-3xl font-bold text-gray-800">Dashboard de Producción</h1>
+                    <div class="flex gap-2 items-center">
+                        <button onclick="openRecipeModal()" class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-book"></i> Recetas</button>
+                        <button onclick="openRecipeListModal()" class="bg-[#005B3A] text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-list"></i> Ver Recetas Guardadas</button>
+                        <button onclick="openTankModal()" class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm"><i class="fas fa-flask"></i> Configurar Tanques</button>
+                    </div>
+                </div>
+
+                <!-- Pestañas -->
+                <div class="flex border-b border-gray-200 mb-6 flex-wrap">
+                    <button onclick="switchProductionTab('semanal')" id="tab-btn-semanal" class="py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]">Producción Semanal</button>
+                    <button onclick="switchProductionTab('seguimiento')" id="tab-btn-seguimiento" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Seguimiento de Lotes</button>
+                    <button onclick="switchProductionTab('planeacion')" id="tab-btn-planeacion" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Planeación (MPS)</button>
+                    <button onclick="switchProductionTab('mrp')" id="tab-btn-mrp" class="py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all">Planeación (MRP)</button>
+                </div>
+
+                <!-- Tab: Seguimiento -->
+                <div id="tab-seguimiento" class="hidden fade-in">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                            <h2 class="text-xl font-bold mb-4 text-[#005B3A]"><i class="fas fa-industry"></i> Lotes en Fermentación / Maduración</h2>
+                            <div id="tracking-active-list" class="space-y-4"></div>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                            <h2 class="text-xl font-bold mb-4 text-gray-700"><i class="fas fa-clipboard-check"></i> Producciones Finalizadas</h2>
+                            <div id="tracking-history-list" class="space-y-2 max-h-[500px] overflow-y-auto pr-2"></div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                        <h2 class="text-lg font-bold mb-4 text-gray-600"><i class="fas fa-eye"></i> Vista Gráfica de Tanques</h2>
+                        <div id="tanks-visual-container" class="flex flex-wrap gap-6 justify-center"></div>
+                    </div>
+                </div>
+
+                <!-- Tab: Producción Semanal -->
+                <div id="tab-semanal" class="hidden fade-in">
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <h3 class="font-bold text-gray-800"><i class="fas fa-cog text-[#005B3A] mr-2"></i>Configuración de Semana</h3>
+                            <p class="text-xs text-gray-500">Define cómo se calcula el número de semana en la producción.</p>
+                        </div>
+                        <div>
+                            <select id="week-mode-select" onchange="changeWeekMode(this.value)" class="p-2 border border-gray-300 rounded-md bg-white text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#005B3A]">
+                                <option value="month">Semana del Mes (Ej: Mayo - Semana 4)</option>
+                                <option value="relative">Semana desde Primera Producción (Ej: Semana 1, Semana 2...)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h2 class="text-xl font-bold mb-4 text-[#005B3A]"><i class="fas fa-tools mr-2"></i> Ajustes de Producción Semanal</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div class="md:col-span-2">
+                                <label class="block text-gray-700 mb-1 font-semibold">Sabor de Cerveza / Receta</label>
+                                <select id="weekly-edit-product" class="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-[#005B3A]" onchange="weeklyProductionCheckIngredients(); renderWeeklyDemandAdjustment();"></select>
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 font-semibold">Fecha de Producción</label>
+                                <input type="date" id="weekly-edit-date" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" onchange="updateWeeklyEditTankSelect(); weeklyProductionCheckIngredients();">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 font-semibold">Semana (Opcional)</label>
+                                <select id="weekly-edit-week" class="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-[#005B3A]" onchange="weeklyWeekChanged()">
+                                    <option value="">-- Auto (Por Fecha) --</option>
+                                    <option value="1">Semana 1</option>
+                                    <option value="2">Semana 2</option>
+                                    <option value="3">Semana 3</option>
+                                    <option value="4">Semana 4</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 font-semibold">Tanque</label>
+                                <select id="weekly-edit-tank" class="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-[#005B3A]" onchange="weeklyProductionCheckIngredients()"></select>
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 font-semibold">Días Fermentación</label>
+                                <input type="number" id="weekly-edit-fermentation-days" value="8" min="1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="weeklyProductionCheckIngredients()">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 font-semibold">Litros Totales (a fermentar)</label>
+                                <input type="number" id="weekly-edit-liters" step="0.01" placeholder="Ej: 120" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="updateWeeklyLitersSplitPreview(); weeklyProductionCheckIngredients();">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 flex items-center gap-1 font-semibold">
+                                    Litros fijos (pedidos)
+                                    <span class="text-xs text-gray-500 cursor-help" title="Se restan del total. El resto va al pronóstico de ventas."><i class="fas fa-info-circle"></i></span>
+                                </label>
+                                <input type="number" id="weekly-edit-fixed-liters" step="0.01" min="0" placeholder="Ej: 100" class="w-full p-2 border border-gray-300 rounded-md bg-amber-50 focus:ring-2 focus:ring-amber-500" oninput="updateWeeklyLitersSplitPreview(); weeklyProductionCheckIngredients();">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 mb-1 flex items-center gap-1 font-semibold">
+                                    Botellas/Unidades
+                                    <span class="text-xs text-gray-500 cursor-help" title="Opcional. Se calcula automáticamente si no lo especificas."><i class="fas fa-info-circle"></i></span>
+                                </label>
+                                <input type="number" id="weekly-edit-units" step="0.01" placeholder="Opcional" class="w-full p-2 border border-gray-300 rounded-md bg-blue-50 focus:ring-2 focus:ring-[#005B3A]">
+                            </div>
+                            <div class="md:col-span-4 flex justify-end gap-2 mt-2">
+                                <button type="button" onclick="resetWeeklyProductionForm()" class="bg-gray-200 text-gray-700 rounded-md px-6 py-2 hover:bg-gray-300 font-semibold transition-all">Limpiar</button>
+                                <button type="button" id="weekly-submit-btn" onclick="startWeeklyProductionActive()" class="bg-[#005B3A] text-white rounded-md px-6 py-2 hover:bg-[#00422a] font-semibold transition-all shadow-md">Iniciar Producción Activa</button>
+                            </div>
+                            <div class="md:col-span-4 bg-blue-50 p-3 rounded-lg border border-blue-200 text-sm" id="weekly-liters-split-preview">
+                                <span class="text-gray-600">Ingresa litros totales y litros fijos para ver el reparto.</span>
+                            </div>
+                            <div class="md:col-span-4 bg-gray-50 p-4 rounded-lg border border-gray-200 mt-3">
+                                <h4 class="text-sm font-bold text-gray-700 mb-2"><i class="fas fa-check-double mr-1 text-[#005B3A]"></i> Verificador de Ingredientes en Inventario (MRP Check)</h4>
+                                <div id="weekly-mrp-status" class="text-sm text-gray-600">
+                                    <span class="text-gray-500">Selecciona un producto y cantidad válida para verificar la materia prima.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-3">
+                            <span class="font-semibold">Litros totales:</span> Volumen planificado (ej. 120 L) - TODO se fermenta en el tanque.<br>
+                            <span class="font-semibold">Litros fijos:</span> Destinados a pedidos firmes (ej. 100 L) - salen del inventario final.<br>
+                            <span class="font-semibold">Restante:</span> Va al pronóstico de ventas (ej. 20 L).<br>
+                            <span class="font-semibold text-orange-600">Overflow:</span> Los litros que exceden la capacidad semanal (720 L) se guardan automáticamente.
+                        </p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                            <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-sliders-h mr-2"></i> Ajuste de Demanda Semanal</h2>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="importWeeklyDemandFromOrders()" class="bg-amber-100 text-amber-800 rounded-md px-4 py-2 hover:bg-amber-200 font-semibold transition-all text-sm"><i class="fas fa-file-import mr-1"></i> Importar desde pedidos</button>
+                                <button type="button" onclick="saveWeeklyDemandAdjustment()" class="bg-[#005B3A] text-white rounded-md px-4 py-2 hover:bg-[#00422a] font-semibold transition-all text-sm shadow-md"><i class="fas fa-save mr-1"></i> Guardar demanda</button>
+                            </div>
+                        </div>
+                        <div id="weekly-demand-adjustment-table"></div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h2 class="text-xl font-bold mb-4 text-gray-800"><i class="fas fa-list mr-2 text-[#005B3A]"></i> Pedidos y Pronósticos</h2>
+                        <div id="weekly-demand-list-container"></div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h2 class="text-xl font-bold mb-4 text-gray-800"><i class="fas fa-beer mr-2 text-[#005B3A]"></i> Producción Terminada por Semana</h2>
+                        <div id="weekly-production-table"></div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h2 class="text-xl font-bold mb-4 text-gray-800"><i class="fas fa-chart-line mr-2 text-[#005B3A]"></i> Ajuste de Pronósticos</h2>
+                        <div id="forecast-adjustment-table"></div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h2 class="text-xl font-bold mb-4 text-gray-800"><i class="fas fa-history mr-2 text-[#005B3A]"></i> Historial de Producción</h2>
+                        <div id="weekly-production-history-editor"></div>
+                    </div>
+
+                </div>
+
+                <!-- Tab: Planeación (MPS/MRP) -->
+                <div id="tab-planeacion" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-calendar-alt"></i> Planeación MPS a 4 Semanas</h2>
+                        <div class="flex items-center space-x-3">
+                            <select id="flavor-select" onchange="cambiarSaborGlobal(this.value)" class="p-2 border border-green-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500 font-bold text-green-800 bg-green-50 shadow-sm cursor-pointer">
+                                <option value="all">Todas las Cervezas (Global)</option>
+                            </select>
+                            <button onclick="runProductionFlow(true)" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded font-bold shadow-md"><i class="fas fa-play mr-2"></i> Ejecutar Cálculo MPS/MRP</button>
+                        </div>
+                    </div>
+                    
+                    <div id="production-output" class="mb-4">
+                        <p class="text-gray-500 italic text-sm">Haz clic en "Ejecutar Cálculo MPS/MRP" para simular la planeación basada en pedidos, pronósticos y recetas.</p>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mb-6 overflow-x-auto">
+                        <h3 class="text-lg font-bold mb-3 text-gray-700">Programa Maestro de Producción (MPS)</h3>
+                        <div id="mps-table-container"></div>
+                    </div>
+
+                    <div id="production-summary-area" class="grid gap-4 mb-6">
+                        <div class="grid grid-cols-1 xl:grid-cols-1 gap-4">
+                            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                                <h3 class="text-lg font-bold mb-3 text-gray-700">Resumen demanda solicitada por semana</h3>
+                                <div id="production-demand-table"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6" id="kpi-container"></div>
+                    
+
+                    
+                                    </div>
+
+                <!-- Tab: MRP -->
+                <div id="tab-mrp" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-boxes"></i> Planeación de Materiales (MRP) a 4 Semanas</h2>
+                    </div>
+                    
+                    <div id="mrp-output" class="mb-4">
+                        <p class="text-gray-500 italic text-sm">Los requerimientos de materiales se calculan automáticamente con base en el MPS.</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                        <h3 class="text-lg font-bold mb-3 text-gray-700">Plan de Requerimientos de Materiales (MRP)</h3>
+                        <div id="mrp-table-container"></div>
+                    </div>
+
+                <!-- Tab: PMP Interactivo -->
+                <div id="tab-pmp" class="hidden fade-in">
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+                        <div>
+                            <h2 class="text-xl font-bold text-[#005B3A]"><i class="fas fa-table mr-2"></i> Programa Maestro de Producción (PMP) Interactivo</h2>
+                            <p class="text-sm text-gray-500 mt-1">Haz clic en cualquier celda de Pedido, Pronóstico o Inv. Inicial para editarla. PMP e Inv. Final se calculan automáticamente.</p>
+                        </div>
+                        <button onclick="if(typeof renderPMPTable==='function') renderPMPTable()" class="bg-[#005B3A] hover:bg-[#00422a] text-white px-4 py-2 rounded-lg font-bold shadow text-sm transition-all">
+                            <i class="fas fa-sync-alt mr-2"></i> Actualizar tabla
+                        </button>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                        <div id="pmp-table-container"></div>
+                    </div>
+                </div>
+            <!-- Sección de Parámetros -->
+            <section id="parametros" class="section fade-in">
+                <div class="flex justify-between items-center mb-6 gap-3 flex-wrap">
+                    <h1 class="text-3xl font-bold text-gray-800"><i class="fas fa-cogs text-[#005B3A] mr-2"></i> Parámetros Generales</h1>
+                    <button onclick="saveSystemParametersForm()" class="bg-[#005B3A] text-white px-5 py-2.5 rounded-lg hover:bg-[#00422a] font-bold shadow-md transition-all">
+                        <i class="fas fa-save mr-2"></i> Guardar y Aplicar
+                    </button>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
+                    <h2 class="text-xl font-bold text-gray-700 mb-2"><i class="fas fa-sliders-h mr-2"></i> Configuración del Entorno de Planeación</h2>
+                    <p class="text-sm text-gray-500 mb-6">Ajusta los valores del modelo operativo. Los cambios se sincronizarán inmediatamente con los módulos MPS y MRP.</p>
+                    
+                    <form id="system-parameters-form" onsubmit="event.preventDefault(); saveSystemParametersForm();">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <!-- Número de Tanques -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-flask text-indigo-600 mr-1"></i> Número de Tanques
+                                </label>
+                                <input type="number" id="param-tanques" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="updateCapacidadSemanalSugerida()">
+                                <p class="text-[10px] text-gray-500 mt-1">Tanques físicos en planta.</p>
+                            </div>
+                            
+                            <!-- Capacidad por Tanque -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-oil-can text-amber-600 mr-1"></i> Capacidad por Tanque (L)
+                                </label>
+                                <input type="number" id="param-capacidad-tanque" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]" oninput="updateCapacidadSemanalSugerida()">
+                                <p class="text-[10px] text-gray-500 mt-1">Capacidad neta por lote.</p>
+                            </div>
+
+                            <!-- Tiempo de Fermentación -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-hourglass-half text-green-600 mr-1"></i> Fermentación (Días)
+                                </label>
+                                <input type="number" id="param-fermentacion" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Días que se ocupa un tanque.</p>
+                            </div>
+
+                            <!-- Capacidad Semanal Total -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-chart-bar text-teal-600 mr-1"></i> Capacidad Semanal Total (L)
+                                </label>
+                                <input type="number" id="param-capacidad-semanal" min="1" required class="w-full p-2 border border-gray-300 rounded-md bg-blue-50 focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-blue-700 mt-1" id="sugerido-capacidad-semanal">Capacidad calculada: 720 L</p>
+                            </div>
+
+                            <!-- Número de Sabores -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-beer text-orange-600 mr-1"></i> Número de Sabores
+                                </label>
+                                <input type="number" id="param-sabores" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Variedades en catálogo.</p>
+                            </div>
+
+                            <!-- Tamaño de Botella -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-wine-bottle text-red-600 mr-1"></i> Tamaño de Botella (L)
+                                </label>
+                                <input type="number" id="param-tamano-botella" step="0.001" min="0.05" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Volumen estándar (ej. 0.33 L).</p>
+                            </div>
+
+                            <!-- Horizonte de Planificación -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-calendar-alt text-purple-600 mr-1"></i> Horizonte (Semanas)
+                                </label>
+                                <input type="number" id="param-horizonte" min="1" max="12" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Semanas proyectadas (MPS/MRP).</p>
+                            </div>
+
+                            <!-- Barrera de Demanda -->
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:shadow-sm transition-all">
+                                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                                    <i class="fas fa-shield-alt text-blue-600 mr-1"></i> Barrera de Demanda (Días)
+                                </label>
+                                <input type="number" id="param-barrera" min="1" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                                <p class="text-[10px] text-gray-500 mt-1">Días comprometidos sin cambios.</p>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-5 rounded-xl shadow border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-3"><i class="fas fa-info-circle text-[#005B3A] mr-2"></i> Lógica de Cálculos e Indicadores</h3>
+                        <ul class="text-xs text-gray-600 space-y-2 list-disc list-inside">
+                            <li><strong>Capacidad Total:</strong> Se calcula automáticamente a partir del número de tanques y su volumen base.</li>
+                            <li><strong>Barrera de Demanda:</strong> Determina el punto temporal a partir del cual las órdenes pasan de ser compras en barril firmes (gastrobares) a proyecciones basadas en pronósticos de botellas.</li>
+                            <li><strong>Planificación MRP:</strong> Utiliza el tamaño de botella configurado para hacer explosiones de materiales, conversiones de litros a unidades finales, y estimación de maltas/lúpulos según las recetas BOM guardadas.</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl shadow border border-gray-200 flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-gray-700 mb-2"><i class="fas fa-sync text-green-700 mr-2"></i> Sincronización Automática</h3>
+                            <p class="text-xs text-gray-500 leading-relaxed">Al presionar "Guardar y Aplicar", el sistema guardará estos parámetros de forma persistente en <strong>localStorage</strong> y recalculará de forma inmediata el MPS y MRP para asegurar la consistencia del inventario y la planificación.</p>
+                        </div>
+                        <div class="pt-4 border-t mt-4 flex justify-end">
+                            <button type="button" onclick="resetDefaultParameters()" class="text-sm font-semibold text-red-600 hover:text-red-800 transition-colors">
+                                <i class="fas fa-undo mr-1"></i> Reestablecer Parámetros por Defecto
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODALES -->
+    
+    <!-- Modal para Añadir/Editar Producto -->
+    <div id="product-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 id="product-modal-title" class="text-2xl font-bold mb-4">Añadir al Inventario</h2>
+            <p id="product-modal-subtitle" class="text-sm text-gray-600 mb-4">Completa los datos del producto o materia prima.</p>
+            <form id="product-form" onsubmit="saveProduct(event)">
+                <input type="hidden" id="product-type" value="final">
+                <input type="hidden" id="product-id" value="">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="mb-4">
+                        <label class="block text-gray-700">SKU (Código)</label>
+                        <input type="text" id="product-sku" required class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700">Nombre</label>
+                        <input type="text" id="product-name" required class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+                <div class="mb-4" id="product-price-div">
+                    <label id="product-price-label" class="block text-gray-700 font-bold">Precio de Venta</label>
+                    <input type="number" id="product-price" step="0.01" required class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+                <div class="mb-4 hidden" id="product-supplier-div">
+                    <label class="block text-gray-700">Proveedor</label>
+                    <select id="product-supplier" class="w-full p-2 border border-gray-300 rounded-md"></select>
+                </div>
+                <div class="mb-4" id="product-volume-div">
+                    <label id="product-volume-label" class="block text-gray-700">Volumen por unidad (L)</label>
+                    <input type="number" id="product-volume" step="0.01" value="1" required class="w-full p-2 border border-gray-300 rounded-md">
+                    <p id="product-volume-help" class="text-xs text-gray-500 italic mt-1">Ej: 0.33 para botella 330 mL</p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700">Unidad</label>
+                    <select id="product-unit-type" required class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="botella">Botella</option>
+                        <option value="Litro">Litro</option>
+                        <option value="Mililitro">Mililitro</option>
+                        <option value="kg">Kilogramo</option>
+                        <option value="und">Unidad</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700">Cantidad Inicial</label>
+                    <input type="number" id="product-quantity" step="0.00000001" required class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+                <div class="mb-4 hidden" id="product-safety-stock-div">
+                    <label class="block text-gray-700">Cantidad mínima para alerta</label>
+                    <input type="number" id="product-safety-stock" step="0.00000001" value="0" class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+                <p id="product-demand-note" class="text-sm text-blue-700 italic mb-4 hidden"></p>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeProductModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Notificaciones -->
+    <div id="notifications-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">Alertas y Notificaciones</h2>
+                <button onclick="closeNotificationsModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div id="notifications-list" class="space-y-3"></div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="closeNotificationsModal()" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal producto creado automáticamente -->
+    <div id="product-created-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-6 rounded-lg w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-3">Producto creado automáticamente</h2>
+            <p class="text-sm text-gray-600 mb-4">Se creó un producto final a partir del nombre de receta. Revisa o completa los datos.</p>
+            <form id="product-created-form" onsubmit="saveCreatedProductFromModal(event)">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-gray-700">SKU</label><input type="text" id="product-created-sku" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div><label class="block text-gray-700">Nombre</label><input type="text" id="product-created-name" disabled class="w-full p-2 border border-gray-300 rounded-md bg-gray-100"></div>
+                    <div><label class="block text-gray-700">Precio</label><input type="number" id="product-created-price" step="0.01" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div><label class="block text-gray-700">Volumen (L)</label><input type="number" id="product-created-volume" step="0.01" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div><label class="block text-gray-700">Unidad</label><select id="product-created-unit" class="w-full p-2 border border-gray-300 rounded-md"><option value="botella">Botella</option><option value="Litro">Litro</option><option value="und">Unidad</option></select></div>
+                    <div><label class="block text-gray-700">Cantidad inicial</label><input type="number" id="product-created-quantity" step="0.00000001" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div><label class="block text-gray-700">Proveedor</label><select id="product-created-supplier" class="w-full p-2 border border-gray-300 rounded-md"></select></div>
+                    <div><label class="block text-gray-700">Mínimo alerta</label><input type="number" id="product-created-safety" step="0.00000001" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button type="button" onclick="closeProductCreatedModal()" class="px-4 py-2 bg-gray-300 rounded-md">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Cliente -->
+    <div id="client-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h2 class="text-2xl font-bold mb-4">Registrar Nuevo Cliente</h2>
+            <form id="client-form" onsubmit="saveClient(event)">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="mb-4"><label class="block text-gray-700">Tipo de Documento</label><select id="client-tipo-doc" required class="w-full p-2 border border-gray-300 rounded-md"><option value="31">NIT</option><option value="13">Cédula de Ciudadanía</option><option value="11">Registro Civil</option><option value="12">Tarjeta de Identidad</option><option value="21">Tarjeta de Extranjería</option><option value="41">Pasaporte</option></select></div>
+                    <div class="mb-4"><label class="block text-gray-700">Número de Documento (NIT/CC)</label><input type="text" id="client-num-doc" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Dígito de Verificación (DV)</label><input type="text" id="client-dv" maxlength="1" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Razón Social</label><input type="text" id="client-razon-social" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4 md:col-span-2"><label class="block text-gray-700">Nombre Comercial</label><input type="text" id="client-nombre-comercial" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Departamento</label><input type="text" id="client-departamento" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Ciudad</label><input type="text" id="client-ciudad" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4 md:col-span-2"><label class="block text-gray-700">Dirección</label><input type="text" id="client-direccion" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Teléfono</label><input type="tel" id="client-telefono" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                    <div class="mb-4"><label class="block text-gray-700">Correo Electrónico</label><input type="email" id="client-correo" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="closeClientModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Proveedor -->
+    <div id="supplier-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-lg">
+            <h2 class="text-2xl font-bold mb-4">Registrar Proveedor</h2>
+            <form id="supplier-form" onsubmit="saveSupplier(event)">
+                <div class="mb-4"><label class="block text-gray-700 font-bold mb-1">Tipo de Persona</label><select id="supplier-type" required class="w-full p-2 border border-gray-300 rounded-md"><option value="empresa">Empresa (Jurídica)</option><option value="persona">Persona Natural</option></select></div>
+                <div class="mb-4"><label class="block text-gray-700">NIT o Cédula</label><input type="text" id="supplier-nit" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="mb-4"><label class="block text-gray-700">Razón Social / Nombre Completo</label><input type="text" id="supplier-name" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="grid grid-cols-2 gap-4"><div class="mb-4"><label class="block text-gray-700">Teléfono</label><input type="tel" id="supplier-phone" required class="w-full p-2 border border-gray-300 rounded-md"></div><div class="mb-4"><label class="block text-gray-700">Correo</label><input type="email" id="supplier-email" class="w-full p-2 border border-gray-300 rounded-md"></div></div>
+                <div class="flex justify-end gap-2 mt-4"><button type="button" onclick="closeSupplierModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button><button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Receta -->
+    <div id="recipe-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h2 id="recipe-modal-title" class="text-2xl font-bold mb-4">Definir Receta (BOM)</h2>
+            <form id="recipe-form" onsubmit="saveRecipe(event)">
+                <div class="mb-4"><label class="block text-gray-700">Producto Final</label><input list="recipe-product-list" id="recipe-product-input" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Escribe o selecciona un producto"><datalist id="recipe-product-list"></datalist><p class="text-xs text-gray-500 italic mt-1">Puedes escribir un nombre nuevo o elegir uno existente.</p></div>
+                <div class="mb-4"><div class="flex justify-between items-center mb-2"><label class="block text-gray-700">Ingredientes (SKU, Cantidad por unidad de volumen)</label><button type="button" onclick="addIngredientRow()" class="text-[#005B3A] hover:text-[#00422a] text-sm font-semibold"><i class="fas fa-plus"></i> Añadir Ingrediente</button></div><div id="recipe-ingredients-container" class="space-y-2"></div></div>
+                <div class="flex justify-end gap-2 mt-6"><button type="button" onclick="closeRecipeModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button><button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar Receta</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Lista Recetas -->
+    <div id="recipe-list-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Recetas Guardadas</h2><button onclick="closeRecipeListModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button></div>
+            <div id="recipe-list-container" class="space-y-4"></div>
+            <div class="mt-6 flex justify-end"><button onclick="closeRecipeListModal()" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Cerrar</button></div>
+        </div>
+    </div>
+
+    <!-- Modal Tanque -->
+    <div id="tank-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Añadir Tanque</h2>
+            <form id="tank-form" onsubmit="saveTank(event)">
+                <div class="mb-4"><label class="block text-gray-700">Nombre del Tanque</label><input type="text" id="tank-name" required placeholder="Ej. Tanque Fermentador A" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="mb-4"><label class="block text-gray-700">Capacidad (Litros)</label><input type="number" id="tank-capacity" required step="0.01" placeholder="Ej. 1000" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="flex justify-end gap-2 mt-6"><button type="button" onclick="closeTankModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button><button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar Tanque</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Info Tanque -->
+    <div id="tank-info-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md">
+            <div class="flex justify-between items-center mb-4"><h2 id="tank-info-title" class="text-2xl font-bold text-gray-800">Detalles del Tanque</h2><button onclick="closeTankInfoModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button></div>
+            <div id="tank-info-content" class="text-gray-700 text-sm space-y-3"></div>
+            <div class="mt-6 flex justify-between items-center gap-2">
+                <div class="flex gap-2">
+                    <button id="tank-info-delete-btn" class="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-semibold transition-colors">
+                        <i class="fas fa-trash-alt mr-1"></i> Eliminar
+                    </button>
+                    <button id="tank-info-edit-btn" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-sm font-semibold transition-colors">
+                        <i class="fas fa-edit mr-1"></i> Editar
+                    </button>
+                </div>
+                <button onclick="closeTankInfoModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold transition-colors">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Editar MPS Cell -->
+    <div id="mps-cell-edit-modal" style="display: none;" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+            <h3 class="font-bold mb-4 text-xl text-[#005B3A]">Editar Datos del PMP</h3>
+            <form onsubmit="saveMpsCellEditFromModal(); return false;">
+                <input type="hidden" id="mps-cell-edit-product-id" />
+                <input type="hidden" id="mps-cell-edit-week-index" />
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1 text-gray-700">Datos de Pedido (L)</label>
+                    <input type="number" id="mps-cell-edit-pedido" class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent" step="0.01" min="0" placeholder="0" />
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1 text-gray-700">Pronóstico (L)</label>
+                    <input type="number" id="mps-cell-edit-pronostico" class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent" step="0.01" min="0" placeholder="0" />
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1 text-gray-700">Inventario Inicial (L)</label>
+                    <input type="number" id="mps-cell-edit-inventario-inicial" class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-green-500 focus:border-transparent" step="0.01" min="0" placeholder="0" />
+                    <p id="mps-cell-edit-inv-hint" class="text-xs text-gray-500 mt-1 hidden">Semanas 2–4: por defecto toma el Inventario Final de la semana anterior.</p>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1 text-gray-700">PMP / Producción Planificada (L)</label>
+                    <input type="number" id="mps-cell-edit-pmp" class="w-full border border-yellow-300 rounded px-3 py-2 bg-yellow-50 text-yellow-900 font-semibold" step="0.01" min="0" placeholder="Auto" />
+                    <p class="text-xs text-gray-500 mt-1">Dejar vacío para calcular automáticamente según demanda e inventario inicial.</p>
+                </div>
+                
+                <div class="mb-6">
+                    <label class="block text-sm font-medium mb-1 text-gray-700">Inventario Final Calculado (L)</label>
+                    <input type="number" id="mps-cell-edit-inventario-final" class="w-full border border-yellow-300 rounded px-3 py-2 bg-yellow-50 text-yellow-900 font-semibold" readonly />
+                </div>
+                
+                <div class="flex justify-end space-x-2">
+                    <button type="button" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400 font-semibold" onclick="closeMpsCellEditModal()">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded hover:bg-[#00422a] font-semibold">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Scripts de utilidad para el modal PMP -->
+    <script>
+        // Mostrar / cerrar modal
+        function showMpsModal() {
+            var modal = document.getElementById('mps-cell-edit-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+            }
+        }
+        function closeMpsCellEditModal() {
+            var modal = document.getElementById('mps-cell-edit-modal');
+            if (modal) {
+                modal.style.display = 'none';
+                modal.classList.add('hidden');
+            }
+            var form = document.querySelector('#mps-cell-edit-modal form');
+            if (form && typeof form.reset === 'function') form.reset();
+            var invHint = document.getElementById('mps-cell-edit-inv-hint');
+            if (invHint) invHint.classList.add('hidden');
+        }
+
+        // Recalcular PMP e Inv. Final en tiempo real al tipear
+        function recalcPmpModal(fromPmpField) {
+            var pedido      = parseFloat(document.getElementById('mps-cell-edit-pedido').value) || 0;
+            var pronostico  = parseFloat(document.getElementById('mps-cell-edit-pronostico').value) || 0;
+            var invInicial  = parseFloat(document.getElementById('mps-cell-edit-inventario-inicial').value) || 0;
+            var pmpInput    = document.getElementById('mps-cell-edit-pmp');
+            var pmpRaw      = pmpInput.value.trim();
+            var demanda     = pedido + pronostico;
+            var calcPmp     = typeof window.calcularPMPDesdeDemanda === 'function'
+                ? window.calcularPMPDesdeDemanda(demanda, invInicial)
+                : (demanda <= invInicial ? 0 : 120);
+            var pmp;
+            if (fromPmpField) {
+                pmp = pmpRaw === '' ? calcPmp : (parseFloat(pmpRaw) || 0);
+            } else {
+                pmp = calcPmp;
+                pmpInput.value = pmp > 0 ? pmp : '';
+            }
+            var invFinal    = invInicial + pmp - demanda;
+            document.getElementById('mps-cell-edit-inventario-final').value = invFinal.toFixed(2);
+            // Colorear inventario final según déficit
+            var invFEl = document.getElementById('mps-cell-edit-inventario-final');
+            invFEl.style.color = invFinal < 0 ? '#b91c1c' : '#92400e';
+            invFEl.style.background = invFinal < 0 ? '#fef2f2' : '#fffbeb';
+        }
+
+        // Abrir modal con datos actuales del producto/semana
+        window.editMPS_Enhanced = function(productoId, weekIndex) {
+            document.getElementById('mps-cell-edit-product-id').value = productoId;
+            document.getElementById('mps-cell-edit-week-index').value = weekIndex;
+
+            var inv = window.inventory || [];
+            var prod = inv.find(function(p) { return p.id == productoId; });
+            var pedido = 0;
+            var pronostico = 0;
+            var invInicial = 0;
+            var invIsChained = false;
+
+            if (prod && typeof window.computePMPChainForProduct === 'function') {
+                var chain = window.computePMPChainForProduct(prod);
+                var week = chain[weekIndex];
+                pedido = week.pedido;
+                pronostico = week.pronostico;
+                invInicial = week.invInicial;
+                invIsChained = week.invInicialIsChained;
+            } else {
+                var bd = window.customWeeklyBarrilDemand;
+                var fl = window.customWeeklyForecastLiters;
+                var ii = window.customInventarioInicialOverrides;
+                pedido = (bd && bd[productoId] && bd[productoId][weekIndex] !== undefined) ? Number(bd[productoId][weekIndex]) : 0;
+                pronostico = (fl && fl[productoId] && fl[productoId][weekIndex] !== undefined) ? Number(fl[productoId][weekIndex]) : 0;
+                invInicial = (ii && ii[productoId] && ii[productoId][weekIndex] !== undefined) ? Number(ii[productoId][weekIndex]) : 0;
+                if (invInicial === 0 && weekIndex === 0 && prod) {
+                    var vol = (prod.volumePerUnit && prod.volumePerUnit > 0) ? prod.volumePerUnit : 1;
+                    invInicial = (prod.quantity || 0) * vol;
+                }
+            }
+
+            document.getElementById('mps-cell-edit-pedido').value = pedido;
+            document.getElementById('mps-cell-edit-pronostico').value = pronostico;
+            document.getElementById('mps-cell-edit-inventario-inicial').value = invInicial;
+
+            var invHint = document.getElementById('mps-cell-edit-inv-hint');
+            if (invHint) {
+                if (weekIndex > 0 && invIsChained) {
+                    invHint.textContent = 'Semana ' + (weekIndex + 1) + ': cargado desde Inv. Final de la Semana ' + weekIndex + ' (' + invInicial.toFixed(1) + ' L). Puede editarlo manualmente si lo necesita.';
+                    invHint.classList.remove('hidden');
+                } else {
+                    invHint.classList.add('hidden');
+                }
+            }
+
+            var pmpOverrides = window.customMpsOverrides;
+            var pmpOverride = (pmpOverrides && pmpOverrides[productoId] && pmpOverrides[productoId][weekIndex] !== undefined)
+                ? pmpOverrides[productoId][weekIndex]
+                : null;
+            var pmpInput = document.getElementById('mps-cell-edit-pmp');
+            pmpInput.value = (pmpOverride !== null && pmpOverride !== undefined) ? pmpOverride : '';
+
+            // Calcular y mostrar PMP e Inv. Final
+            recalcPmpModal(pmpInput.value.trim() !== '');
+
+            // Mostrar nombre del producto en el título del modal
+            var prod2 = prod || inv.find(function(p) { return p.id == productoId; });
+            var prodName = prod2 ? prod2.name : 'Producto';
+            var titleEl = document.querySelector('#mps-cell-edit-modal h3');
+            if (titleEl) titleEl.textContent = 'Editar PMP — ' + prodName + ' (Semana ' + (weekIndex + 1) + ')';
+
+            showMpsModal();
+        };
+
+        // Registrar listeners de recalculo en tiempo real (se ejecuta cuando el DOM está listo)
+        document.addEventListener('DOMContentLoaded', function() {
+            ['mps-cell-edit-pedido','mps-cell-edit-pronostico','mps-cell-edit-inventario-inicial'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.addEventListener('input', function() { recalcPmpModal(false); });
+            });
+            var pmpEl = document.getElementById('mps-cell-edit-pmp');
+            if (pmpEl) pmpEl.addEventListener('input', function() { recalcPmpModal(true); });
+        });
+    </script>
+
+    <!-- Modal Editar Demanda (Pedido/Pronóstico) -->
+    <div id="demand-edit-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md shadow-2xl border border-gray-100">
+            <h2 id="demand-edit-title" class="text-2xl font-bold mb-4 text-[#005B3A]">Editar Demanda</h2>
+            <form id="demand-edit-form" onsubmit="saveDemandEdit(event)">
+                <input type="hidden" id="edit-demand-id">
+                <input type="hidden" id="edit-demand-type"> <!-- 'order' o 'forecast' -->
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Producto</label>
+                    <input type="text" id="edit-demand-product-name" disabled class="w-full p-2 border border-gray-300 rounded-md bg-gray-100 font-medium">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Cantidad (Litros)</label>
+                    <input type="number" id="edit-demand-qty" required step="0.01" min="0.01" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 font-semibold mb-1">Fecha de Entrega / Objetivo</label>
+                    <input type="date" id="edit-demand-date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#005B3A]">
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button type="button" onclick="closeDemandEditModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold transition-colors">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a] font-semibold transition-colors shadow">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Schedule Tanque -->
+    <div id="tank-schedule-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md">
+            <h2 id="tank-schedule-title" class="text-2xl font-bold mb-4">Asignar Lote a Tanque</h2>
+            <form id="tank-schedule-form" onsubmit="saveTankSchedule(event)">
+                <input type="hidden" id="tank-schedule-id"><input type="hidden" id="tank-schedule-edit">
+                <div class="mb-4"><label class="block text-gray-700">Producto a Fermentar</label><select id="tank-schedule-product" required class="w-full p-2 border border-gray-300 rounded-md"></select></div>
+                <div class="mb-4"><label class="block text-gray-700">Volumen (Litros)</label><input type="number" id="tank-schedule-qty" required step="0.01" class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="grid grid-cols-3 gap-4"><div class="mb-4"><label class="block text-gray-700">Días Fermentación</label><input type="number" id="tank-schedule-fermentation-days" required step="1" min="1" value="8" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md"></div><div class="mb-4"><label class="block text-gray-700">Días Embazado</label><input type="number" id="tank-schedule-bottling-days" required step="1" min="0" value="2" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md"></div><div class="mb-4"><label class="block text-gray-700">Días Empaquetado</label><input type="number" id="tank-schedule-packaging-days" required step="1" min="0" value="1" onchange="suggestTankScheduleEnd()" class="w-full p-2 border border-gray-300 rounded-md"></div></div>
+                <div class="grid grid-cols-2 gap-4"><div class="mb-4"><label class="block text-gray-700">Fecha Inicio</label><input type="date" id="tank-schedule-start" required class="w-full p-2 border border-gray-300 rounded-md" onchange="suggestTankScheduleEnd()"></div><div class="mb-4"><label class="block text-gray-700">Fecha Estimada Fin</label><input type="date" id="tank-schedule-end" required class="w-full p-2 border border-gray-300 rounded-md"></div></div>
+                <div class="flex justify-end gap-2 mt-6"><button type="button" onclick="closeTankScheduleModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button><button type="submit" class="px-4 py-2 bg-[#005B3A] text-white rounded-md hover:bg-[#00422a]">Guardar Lote</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Info Bodega -->
+    <div id="warehouse-info-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4"><h2 id="warehouse-info-title" class="text-2xl font-bold text-gray-800">Detalles de Bodega</h2><button onclick="closeWarehouseInfoModal()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button></div>
+            <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-gray-100"><tr><th class="p-3 border-b">Lote</th><th class="p-3 border-b">Producto</th><th class="p-3 border-b">Cantidad</th><th class="p-3 border-b">Fecha Elaboración</th><th class="p-3 border-b">Acciones</th></tr></thead><tbody id="warehouse-info-body"></tbody></table></div>
+            <div class="mt-6 flex justify-end"><button onclick="closeWarehouseInfoModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cerrar</button></div>
+        </div>
+    </div>
+
+    <!-- Modal Editar Lote -->
+    <div id="batch-edit-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white p-8 rounded-lg w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Editar Lote</h2>
+            <form id="batch-edit-form" onsubmit="saveBatchEdit(event)">
+                <input type="hidden" id="edit-batch-id">
+                <div class="mb-4"><label class="block text-gray-700">Producto</label><input type="text" id="edit-batch-product-name" disabled class="w-full p-2 border border-gray-300 rounded-md bg-gray-100"></div>
+                <div class="grid grid-cols-2 gap-4"><div class="mb-4"><label class="block text-gray-700">Código del Lote</label><input type="text" id="edit-batch-lot" required class="w-full p-2 border border-gray-300 rounded-md"></div><div class="mb-4"><label class="block text-gray-700">Cantidad</label><input type="number" id="edit-batch-qty" required step="1" class="w-full p-2 border border-gray-300 rounded-md"></div></div>
+                <div class="mb-4"><label class="block text-gray-700">Fecha de Elaboración</label><input type="date" id="edit-batch-date" required class="w-full p-2 border border-gray-300 rounded-md"></div>
+                <div class="mb-4"><label class="block text-gray-700">Ubicación (Bodega)</label><select id="edit-batch-warehouse" required class="w-full p-2 border border-gray-300 rounded-md"></select></div>
+                <div class="flex justify-end gap-2 mt-6"><button type="button" onclick="closeBatchEditModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancelar</button><button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700">Guardar Cambios</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Print Area -->
+    <div id="print-area" class="hidden bg-white text-black p-8"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var probe = document.createElement('div');
+            probe.className = 'hidden';
+            document.body.appendChild(probe);
+            var tailwindOk = window.getComputedStyle(probe).display === 'none';
+            probe.remove();
+            if (!tailwindOk) {
+                var s = document.createElement('script');
+                s.src = 'https://cdn.tailwindcss.com/3.4.16';
+                document.head.appendChild(s);
+            }
+        });
+    </script>
+    <script type="module" src="funciones.js"></script>
+</body>
+</html>
+
