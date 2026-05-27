@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMP - Tabla Interactiva</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados para celdas editables */
+        .pmp-editable-cell {
+            background-color: #f0fdf4;
+            border: 1px solid #86efac;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: text;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            color: #166534;
+        }
+
+        .pmp-editable-cell:hover {
+            background-color: #dcfce7;
+            border-color: #4ade80;
+            box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+        }
+
+        .pmp-editable-cell:focus {
+            outline: none;
+            background-color: #e0fce7;
+            border-color: #22c55e;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+        }
+
+        .pmp-calculated-cell {
+            background-color: #fef3c7;
+            border: 1px solid #fcd34d;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: not-allowed;
+            font-weight: 600;
+            color: #854d0e;
+            user-select: none;
+        }
+
+        .pmp-table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .pmp-table thead {
+            background: linear-gradient(135deg, #005B3A 0%, #00422a 100%);
+            color: white;
+            font-weight: 600;
+            text-align: left;
+        }
+
+        .pmp-table thead th {
+            padding: 12px 16px;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .pmp-table thead th:last-child {
+            border-right: none;
+        }
+
+        .pmp-table tbody tr {
+            border-bottom: 1px solid #e5e7eb;
+            transition: background-color 0.2s ease;
+        }
+
+        .pmp-table tbody tr:hover {
+            background-color: #f9fafb;
+        }
+
+        .pmp-table tbody td {
+            padding: 12px 16px;
+            border-right: 1px solid #f3f4f6;
+        }
+
+        .pmp-table tbody td:last-child {
+            border-right: none;
+        }
+
+        .pmp-table tbody tr:first-child td {
+            font-weight: 600;
+            color: #1f2937;
+            background-color: #f3f4f6;
+            width: 180px;
+        }
+
+        /* Input sin bordes para las celdas editables */
+        .pmp-editable-cell input {
+            width: 100%;
+            border: none;
+            background: transparent;
+            padding: 0;
+            margin: 0;
+            font-family: inherit;
+            font-size: inherit;
+            font-weight: inherit;
+            color: inherit;
+        }
+
+        .pmp-editable-cell input:focus {
+            outline: none;
+        }
+
+        .pmp-cell-label {
+            font-size: 0.75rem;
+            color: #6b7280;
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 400;
+        }
+
+        .pmp-warning {
+            background-color: #fee2e2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            margin-top: 12px;
+        }
+
+        .pmp-info-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #0284c7;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            color: #0c4a6e;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="max-w-7xl mx-auto py-8 px-4">
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h1 class="text-3xl font-bold text-[#005B3A] mb-2">
+                <i class="fas fa-calendar-alt mr-3"></i>Programa Maestro de Producción (PMP)
+            </h1>
+            <p class="text-gray-600 mb-6">Tabla interactiva para gestionar pedidos, pronósticos e inventario. Los campos en <span class="bg-green-100 px-2 py-1 rounded">verde</span> son editables, los en <span class="bg-yellow-100 px-2 py-1 rounded">amarillo</span> se calculan automáticamente.</p>
+
+            <div class="pmp-info-box">
+                <i class="fas fa-info-circle mr-2"></i>
+                <strong>Lógica del PMP:</strong> Si (Pedido + Pronóstico) ≤ Inventario Inicial, entonces PMP = 0. Si no, PMP = 120.
+                <br>
+                <strong>Inventario Final:</strong> Inv. Inicial - PMP - Demanda (Demanda = máx(Pedido, Pronóstico))
+            </div>
+
+            <!-- Tabla PMP -->
+            <div class="overflow-x-auto rounded-lg border border-gray-200">
+                <table class="pmp-table">
+                    <thead>
+                        <tr>
+                            <th colspan="1">Concepto</th>
+                            <th colspan="4" class="text-center">Semana 1</th>
+                            <th colspan="4" class="text-center">Semana 2</th>
+                            <th colspan="4" class="text-center">Semana 3</th>
+                            <th colspan="4" class="text-center">Semana 4</th>
+                        </tr>
+                        <tr>
+                            <th style="width: 180px;">Producto</th>
+                            <th>Pedido</th>
+                            <th>Pronóstico</th>
+                            <th>Inv. Inicial</th>
+                            <th>PMP</th>
+                            <th>Inv. Final</th>
+
+                            <th>Pedido</th>
+                            <th>Pronóstico</th>
+                            <th>Inv. Inicial</th>
+                            <th>PMP</th>
+                            <th>Inv. Final</th>
+
+                            <th>Pedido</th>
+                            <th>Pronóstico</th>
+                            <th>Inv. Inicial</th>
+                            <th>PMP</th>
+                            <th>Inv. Final</th>
+
+                            <th>Pedido</th>
+                            <th>Pronóstico</th>
+                            <th>Inv. Inicial</th>
+                            <th>PMP</th>
+                            <th>Inv. Final</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pmp-table-body">
+                        <!-- Se llenará con JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Botones de acción -->
+            <div class="flex gap-4 mt-6">
+                <button onclick="exportPMPtoCSV()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                    <i class="fas fa-download"></i>Exportar CSV
+                </button>
+                <button onclick="resetPMPTable()" class="bg-gray-400 hover:bg-gray-500 text-white px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                    <i class="fas fa-redo"></i>Reiniciar
+                </button>
+                <button onclick="savePMPData()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                    <i class="fas fa-save"></i>Guardar Datos
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===========================
+        // CONFIGURACIÓN Y DATOS INICIALES
+        // ===========================
+        const WEEKS = 4;
+        const PRODUCTS = [
+            { id: 'cerveza_roja', name: 'Cerveza Roja' },
+            { id: 'cerveza_negra', name: 'Cerveza Negra' },
+            { id: 'cerveza_ipa', name: 'Cerveza IPA' },
+            { id: 'cerveza_pilsen', name: 'Cerveza Pilsen' }
+        ];
+
+        // Datos de la tabla (estructura: pmpData[productId][week])
+        let pmpData = {};
+
+        // Inicializa la estructura de datos
+        function initializePMPData() {
+            pmpData = {};
+            PRODUCTS.forEach(product => {
+                pmpData[product.id] = {};
+                for (let week = 0; week < WEEKS; week++) {
+                    pmpData[product.id][week] = {
+                        pedido: Math.floor(Math.random() * 50) + 10,
+                        pronostico: Math.floor(Math.random() * 60) + 20,
+                        inventarioInicial: Math.floor(Math.random() * 100) + 50,
+                        pmp: 0,
+                        inventarioFinal: 0
+                    };
+                }
+            });
+            loadPMPDataFromStorage();
+            calculateAllPMP();
+        }
+
+        // ===========================
+        // LÓGICA DE CÁLCULO PMP
+        // ===========================
+        /**
+         * Calcula PMP e Inventario Final para una celda específica
+         * Lógica: 
+         * - PMP: Si (Pedido + Pronóstico) <= Inventario Inicial => 0, sino 120
+         * - Demanda: máx(Pedido, Pronóstico)
+         * - Inv. Final: Inventario Inicial - PMP - Demanda
+         */
+        function calculatePMP(productId, week) {
+            const row = pmpData[productId][week];
+            const pedido = parseFloat(row.pedido) || 0;
+            const pronostico = parseFloat(row.pronostico) || 0;
+            const inventarioInicial = parseFloat(row.inventarioInicial) || 0;
+
+            // Demanda = máximo entre pedido y pronóstico
+            const demanda = Math.max(pedido, pronostico);
+
+            // PMP: Si (Pedido + Pronóstico) <= Inv. Inicial, entonces 0, sino 120
+            const sumaPedidoPronostico = pedido + pronostico;
+            row.pmp = (sumaPedidoPronostico <= inventarioInicial) ? 0 : 120;
+
+            // Inventario Final = Inv. Inicial - PMP - Demanda
+            row.inventarioFinal = inventarioInicial - row.pmp - demanda;
+
+            return row;
+        }
+
+        /**
+         * Recalcula todos los valores de PMP de la tabla
+         */
+        function calculateAllPMP() {
+            PRODUCTS.forEach(product => {
+                for (let week = 0; week < WEEKS; week++) {
+                    calculatePMP(product.id, week);
+                }
+            });
+        }
+
+        // ===========================
+        // RENDERIZADO DE LA TABLA
+        // ===========================
+        function renderPMPTable() {
+            const tbody = document.getElementById('pmp-table-body');
+            tbody.innerHTML = '';
+
+            PRODUCTS.forEach(product => {
+                const row = document.createElement('tr');
+                
+                // Nombre del producto
+                const productCell = document.createElement('td');
+                productCell.innerHTML = `<strong>${product.name}</strong>`;
+                productCell.style.fontWeight = '600';
+                row.appendChild(productCell);
+
+                // Celdas para cada semana
+                for (let week = 0; week < WEEKS; week++) {
+                    const data = pmpData[product.id][week];
+
+                    // Celda: Pedido (editable)
+                    const pedidoCell = document.createElement('td');
+                    pedidoCell.innerHTML = `
+                        <div class="pmp-cell-label">Pedido (L)</div>
+                        <div class="pmp-editable-cell">
+                            <input type="number" 
+                                   value="${data.pedido}" 
+                                   onchange="updatePMPCell('${product.id}', ${week}, 'pedido', this.value)"
+                                   oninput="updateCellPreview(this)"
+                                   step="0.01" 
+                                   min="0"
+                                   placeholder="0">
+                        </div>
+                    `;
+                    row.appendChild(pedidoCell);
+
+                    // Celda: Pronóstico (editable)
+                    const pronosticoCell = document.createElement('td');
+                    pronosticoCell.innerHTML = `
+                        <div class="pmp-cell-label">Pronóstico (L)</div>
+                        <div class="pmp-editable-cell">
+                            <input type="number" 
+                                   value="${data.pronostico}" 
+                                   onchange="updatePMPCell('${product.id}', ${week}, 'pronostico', this.value)"
+                                   oninput="updateCellPreview(this)"
+                                   step="0.01" 
+                                   min="0"
+                                   placeholder="0">
+                        </div>
+                    `;
+                    row.appendChild(pronosticoCell);
+
+                    // Celda: Inventario Inicial (editable)
+                    const invInicialCell = document.createElement('td');
+                    invInicialCell.innerHTML = `
+                        <div class="pmp-cell-label">Inv. Inicial (L)</div>
+                        <div class="pmp-editable-cell">
+                            <input type="number" 
+                                   value="${data.inventarioInicial}" 
+                                   onchange="updatePMPCell('${product.id}', ${week}, 'inventarioInicial', this.value)"
+                                   oninput="updateCellPreview(this)"
+                                   step="0.01" 
+                                   min="0"
+                                   placeholder="0">
+                        </div>
+                    `;
+                    row.appendChild(invInicialCell);
+
+                    // Celda: PMP (calculada automáticamente)
+                    const pmpCell = document.createElement('td');
+                    pmpCell.innerHTML = `
+                        <div class="pmp-cell-label">PMP (L)</div>
+                        <div class="pmp-calculated-cell" id="pmp-${product.id}-${week}-pmp">
+                            ${data.pmp}
+                        </div>
+                    `;
+                    row.appendChild(pmpCell);
+
+                    // Celda: Inventario Final (calculada automáticamente)
+                    const invFinalCell = document.createElement('td');
+                    invFinalCell.innerHTML = `
+                        <div class="pmp-cell-label">Inv. Final (L)</div>
+                        <div class="pmp-calculated-cell" id="pmp-${product.id}-${week}-final">
+                            ${data.inventarioFinal.toFixed(2)}
+                        </div>
+                    `;
+                    row.appendChild(invFinalCell);
+                }
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // ===========================
+        // ACTUALIZACIÓN DE CELDAS
+        // ===========================
+        /**
+         * Actualiza un valor en la tabla y recalcula los campos dependientes
+         */
+        function updatePMPCell(productId, week, field, value) {
+            pmpData[productId][week][field] = parseFloat(value) || 0;
+            calculatePMP(productId, week);
+            updateCellDisplay(productId, week);
+        }
+
+        /**
+         * Actualiza solo la visualización de las celdas calculadas
+         */
+        function updateCellDisplay(productId, week) {
+            const data = pmpData[productId][week];
+            
+            const pmpCell = document.getElementById(`pmp-${productId}-${week}-pmp`);
+            if (pmpCell) {
+                pmpCell.textContent = data.pmp;
+            }
+
+            const finalCell = document.getElementById(`pmp-${productId}-${week}-final`);
+            if (finalCell) {
+                finalCell.textContent = data.inventarioFinal.toFixed(2);
+                
+                // Cambiar color si el inventario final es negativo
+                if (data.inventarioFinal < 0) {
+                    finalCell.style.backgroundColor = '#fee2e2';
+                    finalCell.style.borderColor = '#fca5a5';
+                    finalCell.style.color = '#991b1b';
+                } else {
+                    finalCell.style.backgroundColor = '#fef3c7';
+                    finalCell.style.borderColor = '#fcd34d';
+                    finalCell.style.color = '#854d0e';
+                }
+            }
+        }
+
+        /**
+         * Proporciona retroalimentación visual mientras se escribe
+         */
+        function updateCellPreview(input) {
+            input.parentElement.style.backgroundColor = '#e0fce7';
+            input.parentElement.style.borderColor = '#22c55e';
+        }
+
+        // ===========================
+        // ALMACENAMIENTO LOCAL
+        // ===========================
+        /**
+         * Guarda los datos en localStorage
+         */
+        function savePMPData() {
+            localStorage.setItem('pmp-data', JSON.stringify(pmpData));
+            alert('✓ Datos guardados exitosamente en el navegador');
+        }
+
+        /**
+         * Carga datos desde localStorage si existen
+         */
+        function loadPMPDataFromStorage() {
+            const stored = localStorage.getItem('pmp-data');
+            if (stored) {
+                try {
+                    pmpData = JSON.parse(stored);
+                } catch (e) {
+                    console.error('Error al cargar datos guardados:', e);
+                }
+            }
+        }
+
+        // ===========================
+        // UTILIDADES
+        // ===========================
+        /**
+         * Exporta la tabla a CSV
+         */
+        function exportPMPtoCSV() {
+            let csv = 'Producto,Semana,Pedido,Pronóstico,Inv. Inicial,PMP,Inv. Final\n';
+            
+            PRODUCTS.forEach(product => {
+                for (let week = 0; week < WEEKS; week++) {
+                    const data = pmpData[product.id][week];
+                    csv += `${product.name},${week + 1},${data.pedido},${data.pronostico},${data.inventarioInicial},${data.pmp},${data.inventarioFinal.toFixed(2)}\n`;
+                }
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `PMP_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        /**
+         * Reinicia la tabla con valores aleatorios
+         */
+        function resetPMPTable() {
+            if (confirm('¿Estás seguro de que deseas reiniciar la tabla? Esta acción no se puede deshacer.')) {
+                initializePMPData();
+                renderPMPTable();
+            }
+        }
+
+        // ===========================
+        // INICIALIZACIÓN AL CARGAR
+        // ===========================
+        document.addEventListener('DOMContentLoaded', () => {
+            initializePMPData();
+            renderPMPTable();
+        });
+    </script>
+</body>
+</html>

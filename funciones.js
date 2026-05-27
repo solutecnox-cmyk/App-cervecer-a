@@ -21,6 +21,7 @@ import * as Inventory from './inventory.js';
 import * as Production from './production.js';
 import * as Tanks from './tanks.js';
 import * as Recipes from './recipes.js';
+import './pmp.js';
 
 // --- Estado de la Aplicación ---
 const STORAGE_KEY = 'erpState';
@@ -105,6 +106,17 @@ Object.defineProperty(window, 'customWeeklyOverflowLiters', {
     get() { return customWeeklyOverflowLiters; },
     set(v) { customWeeklyOverflowLiters = v; }
 });
+// Custom MPS overrides (manual edits por producto por semana)
+let customMpsOverrides = savedState.customMpsOverrides || {};
+let customInventarioInicialOverrides = savedState.customInventarioInicialOverrides || {};
+Object.defineProperty(window, 'customMpsOverrides', {
+    get() { return customMpsOverrides; },
+    set(v) { customMpsOverrides = v; }
+});
+Object.defineProperty(window, 'customInventarioInicialOverrides', {
+    get() { return customInventarioInicialOverrides; },
+    set(v) { customInventarioInicialOverrides = v; }
+});
 Object.defineProperty(window, 'weeklyDemandOverridesActive', {
     get() { return weeklyDemandOverridesActive; },
     set(v) { weeklyDemandOverridesActive = v; }
@@ -177,7 +189,9 @@ window.closeProductCreatedModal = Inventory.closeProductCreatedModal;
 
 // Production
 window.computeWeeklyDemandFromOrders = Production.computeWeeklyDemandFromOrders;
+window.computeWeeklyDemandForProduct = Production.computeWeeklyDemandForProduct;
 window.loadMRP = Production.loadMRP;
+window.renderPMPTable = Production.renderPMPTable;
 
 // Fórmulas matemáticas de MPS/MRP del Excel
 window.calcularCapacidadTotal = Production.calcularCapacidadTotal;
@@ -211,6 +225,7 @@ window.calcularProduccionBotellas = Production.calcularProduccionBotellas;
 window.proyectarDemanda = Production.proyectarDemanda;
 window.ejecutarMPS = Production.ejecutarMPS;
 window.ejecutarMRP = Production.ejecutarMRP;
+window.calcularProduccionPronostico = Production.calcularProduccionPronostico;
 
 // Tanks
 window.openTankInfoModal = Tanks.openTankInfoModal;
@@ -229,14 +244,44 @@ function getFinishedProductStockLiters(productId) {
 
 function getWeeklyForecastLitersForPlanning() {
     if (weeklyDemandOverridesActive) {
-        return customWeeklyForecastLiters.map(v => Number(v) || 0);
+        const total = [0, 0, 0, 0];
+        const finalProducts = inventory.filter(p => p.type !== 'raw');
+        finalProducts.forEach(p => {
+            const productOverrides = customWeeklyForecastLiters[p.id];
+            if (productOverrides && Array.isArray(productOverrides)) {
+                for (let w = 0; w < 4; w++) {
+                    total[w] += Number(productOverrides[w]) || 0;
+                }
+            } else {
+                const computed = computeWeeklyDemandForProduct(p.id);
+                for (let w = 0; w < 4; w++) {
+                    total[w] += computed.forecastL[w] || 0;
+                }
+            }
+        });
+        return total;
     }
     return computeWeeklyDemandFromOrders().forecastL;
 }
 
 function getWeeklyBarrilLitersForPlanning() {
     if (weeklyDemandOverridesActive) {
-        return customWeeklyBarrilDemand.map(v => Number(v) || 0);
+        const total = [0, 0, 0, 0];
+        const finalProducts = inventory.filter(p => p.type !== 'raw');
+        finalProducts.forEach(p => {
+            const productOverrides = customWeeklyBarrilDemand[p.id];
+            if (productOverrides && Array.isArray(productOverrides)) {
+                for (let w = 0; w < 4; w++) {
+                    total[w] += Number(productOverrides[w]) || 0;
+                }
+            } else {
+                const computed = computeWeeklyDemandForProduct(p.id);
+                for (let w = 0; w < 4; w++) {
+                    total[w] += computed.barril[w] || 0;
+                }
+            }
+        });
+        return total;
     }
     return computeWeeklyDemandFromOrders().barril;
 }
@@ -327,12 +372,31 @@ let editingProductId = null;
 let tanks = initial.tanks || savedState.tanks || JSON.parse(localStorage.getItem('tanks')) || [];
 let purchaseOrders = initial.purchaseOrders || savedState.purchaseOrders || JSON.parse(localStorage.getItem('purchaseOrders')) || [];
 let productionHistory = initial.productionHistory || savedState.productionHistory || JSON.parse(localStorage.getItem('productionHistory')) || [];
+function migrateLegacyArrayToProductObject(val) {
+    if (Array.isArray(val)) {
+        // If it's a legacy flat array, map it to the first final product (201)
+        return { "201": val };
+    }
+    return val && typeof val === 'object' ? val : {};
+}
+
+function migrateLegacyArrayToWeekObject(val) {
+    if (Array.isArray(val)) {
+        const obj = {};
+        val.forEach((v, idx) => {
+            obj[idx] = v;
+        });
+        return obj;
+    }
+    return val && typeof val === 'object' ? val : {};
+}
+
 let weekCalculationMode = (initial.weekCalculationMode || savedState.weekCalculationMode) || 'month';
 let customWeeklyCapacities = (initial.customWeeklyCapacities && initial.customWeeklyCapacities.length > 0) ? initial.customWeeklyCapacities : ((savedState.customWeeklyCapacities && savedState.customWeeklyCapacities.length > 0) ? savedState.customWeeklyCapacities : [720, 720, 720, 720]);
-let customWeeklyBarrilDemand = (initial.customWeeklyBarrilDemand && initial.customWeeklyBarrilDemand.length > 0) ? initial.customWeeklyBarrilDemand : ((savedState.customWeeklyBarrilDemand && savedState.customWeeklyBarrilDemand.length > 0) ? savedState.customWeeklyBarrilDemand : [0, 0, 0, 0]);
-let customWeeklyForecastLiters = (initial.customWeeklyForecastLiters && initial.customWeeklyForecastLiters.length > 0) ? initial.customWeeklyForecastLiters : ((savedState.customWeeklyForecastLiters && savedState.customWeeklyForecastLiters.length > 0) ? savedState.customWeeklyForecastLiters : [0, 0, 0, 0]);
-let customWeeklyOverflowBottles = (initial.customWeeklyOverflowBottles && initial.customWeeklyOverflowBottles.length > 0) ? initial.customWeeklyOverflowBottles : ((savedState.customWeeklyOverflowBottles && savedState.customWeeklyOverflowBottles.length > 0) ? savedState.customWeeklyOverflowBottles : [0, 0, 0, 0]);
-let customWeeklyOverflowLiters = (initial.customWeeklyOverflowLiters && initial.customWeeklyOverflowLiters.length > 0) ? initial.customWeeklyOverflowLiters : ((savedState.customWeeklyOverflowLiters && savedState.customWeeklyOverflowLiters.length > 0) ? savedState.customWeeklyOverflowLiters : [0, 0, 0, 0]);
+let customWeeklyBarrilDemand = migrateLegacyArrayToProductObject(initial.customWeeklyBarrilDemand || savedState.customWeeklyBarrilDemand);
+let customWeeklyForecastLiters = migrateLegacyArrayToProductObject(initial.customWeeklyForecastLiters || savedState.customWeeklyForecastLiters);
+let customWeeklyOverflowBottles = migrateLegacyArrayToWeekObject(initial.customWeeklyOverflowBottles || savedState.customWeeklyOverflowBottles);
+let customWeeklyOverflowLiters = migrateLegacyArrayToWeekObject(initial.customWeeklyOverflowLiters || savedState.customWeeklyOverflowLiters);
 let weeklyDemandOverridesActive = typeof initial.weeklyDemandOverridesActive !== 'undefined' ? initial.weeklyDemandOverridesActive : (savedState.weeklyDemandOverridesActive || false);
 let systemParameters = initial.systemParameters || savedState.systemParameters || {
     numeroTanques: 6,
@@ -342,15 +406,78 @@ let systemParameters = initial.systemParameters || savedState.systemParameters |
     numeroSabores: 6,
     tamanoBotella: 0.33,
     horizontePlanificacion: 4,
-    barreraDemanda: 14
+    barreraDemanda: 14,
+    loteMinimo: 80
 };
 
+// --- Edit Planning Modal handlers (definido antes de DOMContentLoaded) ---
+window.editPlanningDemand = function (productId, weekIdx) {
+    const prod = inventory.find(p => p.id === productId);
+    const modal = document.getElementById('edit-planning-modal');
+    if (!modal) {
+        console.warn('Modal edit-planning-modal no encontrado');
+        return;
+    }
+    const title = document.getElementById('edit-planning-title');
+    const input = document.getElementById('edit-planning-value');
+    const current = (window.customMpsOverrides && window.customMpsOverrides[productId] && window.customMpsOverrides[productId][weekIdx] !== undefined)
+        ? window.customMpsOverrides[productId][weekIdx]
+        : (window._lastMpsPlan && window._lastMpsPlan[productId] ? window._lastMpsPlan[productId][weekIdx] : 0);
+    title.innerText = `${prod ? prod.name : 'Producto'} —  ${getWeekLabel(getDateForWeekOffset(weekIdx))}`;
+    input.value = current || 0;
+    modal.classList.remove('hidden');
+    modal.dataset.productId = productId;
+    modal.dataset.weekIdx = weekIdx;
+    input.focus();
+};
+
+window.closeEditPlanningModal = function () {
+    const modal = document.getElementById('edit-planning-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    delete modal.dataset.productId;
+    delete modal.dataset.weekIdx;
+};
+
+window.saveEditPlanningModal = function () {
+    const modal = document.getElementById('edit-planning-modal');
+    if (!modal) return;
+    const pid = Number(modal.dataset.productId);
+    const w = Number(modal.dataset.weekIdx);
+    const input = document.getElementById('edit-planning-value');
+    const val = Number(input.value) || 0;
+    if (!window.customMpsOverrides[pid]) window.customMpsOverrides[pid] = [0, 0, 0, 0];
+    window.customMpsOverrides[pid][w] = val;
+    // Persistir y recalcular
+    saveData();
+    window._mpsMrpCalculated = true;
+    window.closeEditPlanningModal();
+    runProductionFlow(true);
+};
+
+window.deleteEditPlanningOverride = function () {
+    const modal = document.getElementById('edit-planning-modal');
+    if (!modal) return;
+    const pid = Number(modal.dataset.productId);
+    const w = Number(modal.dataset.weekIdx);
+    if (window.customMpsOverrides[pid]) {
+        window.customMpsOverrides[pid][w] = undefined;
+        // If all entries are undefined or zero-length, we can delete the array entirely
+        const allEmpty = window.customMpsOverrides[pid].every(v => typeof v === 'undefined');
+        if (allEmpty) delete window.customMpsOverrides[pid];
+    }
+    saveData();
+    window.closeEditPlanningModal();
+    window._mpsMrpCalculated = true;
+    runProductionFlow(true);
+};
 
 // --- Inicialización ---
 document.addEventListener('DOMContentLoaded', () => {
     if (inventory.length === 0) {
         seedSampleData();
     }
+    initializeEditPlanningModal();
     loadClients();
     loadSuppliers();
     loadInventory();
@@ -374,6 +501,32 @@ document.addEventListener('DOMContentLoaded', () => {
     showSection('produccion');
     switchProductionTab('semanal');
 });
+
+// Inicializar modal de edición de MPS una sola vez
+function initializeEditPlanningModal() {
+    if (document.getElementById('edit-planning-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'edit-planning-modal';
+    modal.className = 'hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-4 w-96 shadow-lg">
+            <h3 class="font-bold mb-2">Editar Planificación MPS</h3>
+            <div class="text-sm text-gray-600 mb-2" id="edit-planning-title"></div>
+            <label class="block text-xs text-gray-700 mb-1">Litros planificados</label>
+            <input id="edit-planning-value" type="number" step="0.1" class="w-full border p-2 rounded mb-3" />
+            <div class="flex justify-between items-center">
+                <button id="edit-planning-delete" class="px-3 py-2 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">Eliminar override</button>
+                <div class="flex gap-2">
+                    <button id="edit-planning-cancel" class="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300">Cancelar</button>
+                    <button id="edit-planning-save" class="px-3 py-2 bg-[#005B3A] text-white rounded hover:bg-[#00422a]">Guardar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('edit-planning-cancel').onclick = window.closeEditPlanningModal;
+    document.getElementById('edit-planning-save').onclick = window.saveEditPlanningModal;
+    document.getElementById('edit-planning-delete').onclick = window.deleteEditPlanningOverride;
+}
 
 function confirmResetSampleData() {
     if (confirm('¿Estás seguro de que deseas cargar los datos de ejemplo? Esto reemplazará los datos actuales de inventario, recetas, proveedores, clientes, tanques y órdenes.')) {
@@ -437,7 +590,7 @@ function seedSampleData() {
 
     warehouses = [
         { id: 1, name: 'Bodega Central', location: 'Primer piso - Almacén' },
-        { id: 2, name: 'Bodega de Fermentación', location: 'Sótano - Área de Tanques' }
+        { id: 2, name: 'Bodega de Fermentación', location: 'Sótano - ÃƒÂ rea de Tanques' }
     ];
 
     batches = [];
@@ -469,11 +622,12 @@ function seedSampleData() {
     productionHistory = [];
 
     customWeeklyCapacities = [720, 720, 720, 720];
-    customWeeklyBarrilDemand = [0, 0, 0, 0];
-    customWeeklyForecastLiters = [0, 0, 0, 0];
-    customWeeklyOverflowBottles = [0, 0, 0, 0];
-    customWeeklyOverflowLiters = [0, 0, 0, 0];
+    customWeeklyBarrilDemand = {};
+    customWeeklyForecastLiters = {};
+    customWeeklyOverflowBottles = {};
+    customWeeklyOverflowLiters = {};
     weeklyDemandOverridesActive = false;
+    customInventarioInicialOverrides = {};
 
     saveData();
     showNotification('Datos iniciales del modelo de Cervecería B&E cargados correctamente.', 'success');
@@ -563,7 +717,7 @@ function handleProductTypeChange() {
         volumeInput.disabled = false;
         safetyInput.disabled = true;
         volumeLabel.textContent = 'Volumen por unidad (L)';
-        volumeHelp.textContent = 'Ej: 0.328 para botella 330 mL — se usa en cálculos de planeación (MPS/MRP).';
+        volumeHelp.textContent = 'Ej: 0.328 para botella 330 mL —  se usa en cálculos de planeación (MPS/MRP).';
     }
 }
 
@@ -1030,7 +1184,7 @@ function addForecastFromUI() {
 function loadOrders() {
     const el = document.getElementById('production-result');
     if (!el) return;
-    el.textContent = `Pedidos: ${orders.length} · Pronósticos: ${forecasts.length}`;
+    el.textContent = `Pedidos: ${orders.length} ' Pronósticos: ${forecasts.length}`;
 }
 
 function loadForecasts() {
@@ -1268,311 +1422,363 @@ function renderPlaneacionPlaceholder() {
 // --- Production Flow: MPS -> MRP -> CRP ---
 window._mpsMrpCalculated = window._mpsMrpCalculated || false;
 
-function runProductionFlow(force = false) {
-    if (force) {
-        window._mpsMrpCalculated = true;
+function getSemanaIndex(dateStr) {
+    return getWeekIndexFromToday(dateStr);
+}
+
+function calcularLotesPMP(necesidadReal) {
+    if (necesidadReal <= 0) return 0;
+    if (necesidadReal <= 80) return 80;
+    if (necesidadReal <= 120) return 120;
+
+    // Si es mayor a 120L
+    let lotes120 = Math.floor(necesidadReal / 120);
+    let remainder = necesidadReal % 120;
+    let extra = 0;
+
+    if (remainder > 0) {
+        if (remainder <= 80) extra = 80;
+        else extra = 120;
     }
 
-    if (!window._mpsMrpCalculated) {
-        const out = document.getElementById('production-output');
-        if (out) {
-            out.innerHTML = `<p class="text-gray-500 italic text-sm">Haz clic en "Ejecutar Cálculo MPS/MRP" para simular la planeación basada en pedidos, pronósticos y recetas.</p>`;
+    return (lotes120 * 120) + extra;
+}
+
+function inicializarMotorData() {
+    window.mpsEngine = {
+        productos: {},
+        materiales: {},
+        globales: {
+            produccionSemanal: [0, 0, 0, 0],
+            produccionTotal: 0,
+            demandaSemanalPedidos: [0, 0, 0, 0],
+            demandaSemanalPronostico: [0, 0, 0, 0],
+            demandaSemanalTotal: [0, 0, 0, 0],
+            utilizacionCapacidad: [0, 0, 0, 0],
+            inventarioFinalAgregado: [0, 0, 0, 0],
+            overflowSemanas: [0, 0, 0, 0],
+            lotesSemanales: [0, 0, 0, 0],
+            saborSeleccionado: 'all'
         }
-        const containers = [
-            'mps-table-container',
-            'mrp-table-container',
-            'kpi-container',
-            'production-volume-table',
-            'weekly-volume-table-container',
-            'production-demand-table',
-            'production-initial-inventory-table'
-        ];
-        containers.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.innerHTML = '';
-        });
-        return;
-    }
-
-    const out = document.getElementById('production-output');
-    out.innerHTML = '<div class="text-blue-600 font-bold"><i class="fas fa-spinner fa-spin mr-2"></i> Calculando Plan Maestro de Producción y Requerimientos...</div>';
-
-    const mpsContainer = document.getElementById('mps-table-container');
-    const mrpContainer = document.getElementById('mrp-table-container');
-    const kpiContainer = document.getElementById('kpi-container');
+    };
 
     const finalProducts = inventory.filter(p => p.type !== 'raw');
-    const rawMaterials = inventory.filter(p => p.type === 'raw');
-
-    // Parámetros del Sistema
-    const LITROS_POR_LOTE = systemParameters.capacidadTanque;
-    const MAX_TANQUES_SEMANA = systemParameters.numeroTanques;
-
-    const scheduledProduction = {};
-    const scheduleEntries = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const getWeekIndexFromDate = (dateStr) => getWeekIndexFromToday(dateStr);
-
-    tanks.forEach(tank => {
-        (tank.schedule || []).forEach(schedule => {
-            const prod = inventory.find(p => p.id === schedule.productId);
-            if (!prod || prod.type === 'raw') return;
-            const weekIndex = getWeekIndexFromDate(schedule.start);
-            if (weekIndex < 0 || weekIndex > 3) return;
-            if (!scheduledProduction[schedule.productId]) {
-                scheduledProduction[schedule.productId] = [0, 0, 0, 0];
-            }
-            scheduledProduction[schedule.productId][weekIndex] += schedule.qty;
-            scheduleEntries.push({
-                tankName: tank.name,
-                productId: schedule.productId,
-                productName: prod.name,
-                weekIndex,
-                qty: schedule.qty,
-                start: schedule.start,
-                end: schedule.end
-            });
-        });
-    });
-
-    // 1. Preparar Demanda por Semana (1 a 4)
-    const demandBarril = {};
-    const demandBotellas = {};
-    let weeklyBarrilDemand = [0, 0, 0, 0];
-    let weeklyForecastBottles = [0, 0, 0, 0];
-    let weeklyForecastLiters = [0, 0, 0, 0];
-    let weeklyProducedLiters = [0, 0, 0, 0];
-    let weeklyOverflowBottles = [0, 0, 0, 0];
-    let weeklyOverflowLiters = [0, 0, 0, 0];
-
     finalProducts.forEach(p => {
-        demandBarril[p.id] = [0, 0, 0, 0];
-        demandBotellas[p.id] = [0, 0, 0, 0];
+        window.mpsEngine.productos[p.id] = {
+            producto: p,
+            demandaPedidos: [0, 0, 0, 0],
+            demandaPronostico: [0, 0, 0, 0],
+            demandaTotal: [0, 0, 0, 0],
+            inventarioInicial: [0, 0, 0, 0],
+            pmpLotes: [0, 0, 0, 0],
+            inventarioFinal: [0, 0, 0, 0],
+            produccionProgramadaPrevia: [0, 0, 0, 0]
+        };
     });
 
+    // Materiales excluidos del MRP (se gestionan por separado, no son insumos de producción)
+    const MRP_EXCLUDED_MATERIALS = ['botella', 'botellas', 'tapa', 'tapas', 'agua'];
+
+    const rawMaterials = inventory.filter(p => {
+        if (p.type !== 'raw') return false;
+        const nameLower = (p.name || '').toLowerCase().trim();
+        // Excluir si el nombre coincide exactamente o contiene alguna palabra excluida como término completo
+        return !MRP_EXCLUDED_MATERIALS.some(excl => nameLower === excl || nameLower.startsWith(excl + ' ') || nameLower.endsWith(' ' + excl) || nameLower.includes(' ' + excl + ' '));
+    });
+    rawMaterials.forEach(rm => {
+        window.mpsEngine.materiales[rm.id] = {
+            material: rm,
+            inventarioActual: rm.quantity,
+            requerimientoBruto: [0, 0, 0, 0],
+            requerimientosPorSabor: {},
+            inventarioProyectado: [0, 0, 0, 0],
+            pedidosLanzados: [0, 0, 0, 0],
+            semanaLanzamiento: [null, null, null, null]
+        };
+    });
+}
+
+function calcularDemandaEngine() {
+    const engine = window.mpsEngine;
+
+    // 1. Pedidos (Barril)
     orders.forEach(o => {
-        const w = getWeekIndexFromToday(o.dueDate);
-        if (demandBarril[o.productId]) {
-            const prod = inventory.find(p => p.id === o.productId);
-            const volume = o.qty * getProductVolumePerUnit(prod);
-            demandBarril[o.productId][w] += volume;
+        const w = getSemanaIndex(o.dueDate);
+        if (w >= 0 && w <= 3 && engine.productos[o.productId]) {
+            const prod = engine.productos[o.productId].producto;
+            engine.productos[o.productId].demandaPedidos[w] += o.qty * getProductVolumePerUnit(prod);
         }
     });
 
+    // 2. Pronósticos (Botellas -> Litros)
     forecasts.forEach(f => {
-        const w = getWeekIndexFromToday(f.targetDate);
-        if (demandBotellas[f.productId]) {
-            demandBotellas[f.productId][w] += f.qty;
-            weeklyForecastBottles[w] += f.qty;
-            const prod = inventory.find(p => p.id === f.productId);
-            weeklyForecastLiters[w] += f.qty * getProductVolumePerUnit(prod);
+        const w = getSemanaIndex(f.targetDate);
+        if (w >= 0 && w <= 3 && engine.productos[f.productId]) {
+            const prod = engine.productos[f.productId].producto;
+            engine.productos[f.productId].demandaPronostico[w] += f.qty * getProductVolumePerUnit(prod);
         }
     });
 
-    for (let w = 0; w < 4; w++) {
-        weeklyBarrilDemand[w] = finalProducts.reduce((sum, p) => sum + demandBarril[p.id][w], 0);
-    }
-
-    productionHistory.forEach(hist => {
-        const wIdx = getWeekIndexForHistoryEntry(hist);
-        if (wIdx >= 0 && wIdx <= 3) {
-            weeklyBarrilDemand[wIdx] += hist.fixedOrders || 0;
-            weeklyOverflowBottles[wIdx] += hist.overflowBottles || 0;
-            const prod = inventory.find(p => p.id === hist.productId);
-            weeklyOverflowLiters[wIdx] += (hist.overflowLiters !== undefined) ? hist.overflowLiters : ((hist.overflowBottles || 0) * getProductVolumePerUnit(prod));
-        }
-    });
-
-    if (weeklyDemandOverridesActive) {
+    // 3. Aplicar Overrides Manuales (Demanda)
+    Object.values(engine.productos).forEach(item => {
+        const pId = item.producto.id;
+        const vol = getProductVolumePerUnit(item.producto);
         for (let w = 0; w < 4; w++) {
-            weeklyBarrilDemand[w] = Number(customWeeklyBarrilDemand[w]) || 0;
-            weeklyForecastLiters[w] = Number(customWeeklyForecastLiters[w]) || 0;
-        }
-    } else {
-        for (let w = 0; w < 4; w++) {
-            if (customWeeklyBarrilDemand[w] > 0) weeklyBarrilDemand[w] = customWeeklyBarrilDemand[w];
-            if (customWeeklyForecastLiters[w] > 0) weeklyForecastLiters[w] = customWeeklyForecastLiters[w];
-        }
-    }
+            if (customWeeklyBarrilDemand[pId] && customWeeklyBarrilDemand[pId][w] !== undefined) {
+                item.demandaPedidos[w] = Number(customWeeklyBarrilDemand[pId][w]) || 0;
+            }
+            if (customWeeklyForecastLiters[pId] && customWeeklyForecastLiters[pId][w] !== undefined) {
+                item.demandaPronostico[w] = Number(customWeeklyForecastLiters[pId][w]) || 0;
+            }
+            item.demandaTotal[w] = item.demandaPedidos[w] + item.demandaPronostico[w];
 
-    // Initialize and calculate mpsPlan and weeklyProducedLiters first so they are ready for the volume table loop
-    const mpsPlan = {};
-    finalProducts.forEach(p => {
-        mpsPlan[p.id] = [0, 0, 0, 0];
+            engine.globales.demandaSemanalPedidos[w] += item.demandaPedidos[w];
+            engine.globales.demandaSemanalPronostico[w] += item.demandaPronostico[w];
+            engine.globales.demandaSemanalTotal[w] += item.demandaTotal[w];
+        }
     });
+}
 
+function recopilarProduccionPrevia() {
+    const engine = window.mpsEngine;
+
+    // Historial activo/inactivo
     productionHistory.forEach(hist => {
-        if (hist.isActive === true) return;
+        if (hist.isActive === true) return; // Si esta activo esta en un tanque
         const wIdx = getWeekIndexForHistoryEntry(hist);
-        if (wIdx >= 0 && wIdx <= 3 && mpsPlan[hist.productId]) {
-            mpsPlan[hist.productId][wIdx] += hist.qtyLiters || 0;
-            weeklyProducedLiters[wIdx] += hist.qtyLiters || 0;
+        if (wIdx >= 0 && wIdx <= 3 && engine.productos[hist.productId]) {
+            engine.productos[hist.productId].produccionProgramadaPrevia[wIdx] += hist.qtyLiters || 0;
         }
     });
 
+    // Tanques en proceso
     tanks.forEach(tank => {
         (tank.schedule || []).forEach(schedule => {
-            const wIdx = getWeekIndexFromDate(schedule.start);
-            if (wIdx >= 0 && wIdx <= 3 && mpsPlan[schedule.productId]) {
-                mpsPlan[schedule.productId][wIdx] += schedule.qty || 0;
-                weeklyProducedLiters[wIdx] += schedule.qty || 0;
+            const wIdx = getSemanaIndex(schedule.start);
+            if (wIdx >= 0 && wIdx <= 3 && engine.productos[schedule.productId]) {
+                engine.productos[schedule.productId].produccionProgramadaPrevia[wIdx] += schedule.qty || 0;
             }
         });
     });
+}
 
+function calcularInventariosYPMP() {
+    const engine = window.mpsEngine;
+
+    Object.values(engine.productos).forEach(item => {
+        const pId = item.producto.id;
+        let invActual = (item.producto.quantity || 0) * getProductVolumePerUnit(item.producto);
+
+        for (let w = 0; w < 4; w++) {
+            // Aplicar override de inv inicial de usuario si existe
+            if (w === 0 && customInventarioInicialOverrides[pId] !== undefined) {
+                invActual = Number(customInventarioInicialOverrides[pId]);
+            }
+            item.inventarioInicial[w] = invActual;
+
+            let demanda = item.demandaTotal[w];
+            let necesidadReal = demanda - invActual;
+
+            // Calculo Industrial PMP
+            let pmpCalculado = calcularLotesPMP(necesidadReal);
+
+            // Regla: Siempre respetamos al menos lo que ya estaba programado fisicamente
+            let pmpFinal = Math.max(item.produccionProgramadaPrevia[w], pmpCalculado);
+
+            // Override PMP de usuario (forzar producción)
+            if (customMpsOverrides[pId] && typeof customMpsOverrides[pId][w] !== 'undefined') {
+                pmpFinal = Number(customMpsOverrides[pId][w]) || 0;
+            }
+
+            item.pmpLotes[w] = pmpFinal;
+
+            // Inventario Final = Inicial + PMP - Demanda
+            item.inventarioFinal[w] = invActual + pmpFinal - demanda;
+
+            invActual = item.inventarioFinal[w];
+
+            // Totales Globales
+            engine.globales.produccionSemanal[w] += pmpFinal;
+            engine.globales.produccionTotal += pmpFinal;
+            engine.globales.lotesSemanales[w] += Math.ceil(pmpFinal / systemParameters.capacidadTanque);
+        }
+    });
+
+    // Overflow global
     for (let w = 0; w < 4; w++) {
+        let invAgg = 0;
+        Object.values(engine.productos).forEach(item => {
+            invAgg += item.inventarioFinal[w];
+        });
+        engine.globales.inventarioFinalAgregado[w] = invAgg;
+
+        // Overflow
         if (w === 0 || w === 1) {
-            weeklyOverflowLiters[w] = Math.max(0, weeklyProducedLiters[w] - weeklyBarrilDemand[w]);
-        } else {
-            weeklyOverflowLiters[w] = 0;
+            engine.globales.overflowSemanas[w] = Math.max(0, engine.globales.produccionSemanal[w] - engine.globales.demandaSemanalPedidos[w]);
         }
 
-        if (customWeeklyOverflowLiters[w] > 0) {
-            weeklyOverflowLiters[w] = customWeeklyOverflowLiters[w];
-        } else if (customWeeklyOverflowBottles[w] > 0) {
-            weeklyOverflowLiters[w] = customWeeklyOverflowBottles[w] * systemParameters.tamanoBotella;
+        // Overrides de Overflow
+        if (typeof customWeeklyOverflowLiters !== "undefined" && customWeeklyOverflowLiters[w] > 0) {
+            engine.globales.overflowSemanas[w] = customWeeklyOverflowLiters[w];
+        } else if (typeof customWeeklyOverflowBottles !== "undefined" && customWeeklyOverflowBottles[w] > 0) {
+            engine.globales.overflowSemanas[w] = customWeeklyOverflowBottles[w] * systemParameters.tamanoBotella;
+        }
+
+        // Capacidad
+        const capSemana = (typeof customWeeklyCapacities !== "undefined" ? customWeeklyCapacities[w] : null) || systemParameters.capacidadSemanalTotal;
+        if (capSemana > 0) {
+            engine.globales.utilizacionCapacidad[w] = Math.round((engine.globales.produccionSemanal[w] / capSemana) * 1000) / 10;
         }
     }
+}
 
-    // Inventario inicial PT en litros
-    const initialInvLiters = finalProducts.reduce(
-        (sum, p) => sum + (p.quantity * getProductVolumePerUnit(p)), 0
-    );
-    const weeklyDemandTotal = [0, 1, 2, 3].map(w => weeklyBarrilDemand[w] + weeklyForecastLiters[w]);
+function calcularMRPEngine() {
+    const engine = window.mpsEngine;
 
-    const weeklyInventoryInitial = [0, 0, 0, 0];
-    const weeklyInventoryFinal = [0, 0, 0, 0];
-    const weeklyForecastProduction = [0, 0, 0, 0];
-    const weeklyTotalProduction = [0, 0, 0, 0];
-    const weeklyBalance = [0, 0, 0, 0];
-    const weeklyDeficit = [false, false, false, false];
-    const weeklyCapacityUtilization = [0, 0, 0, 0];
-    const weeklyForecastCoversDemand = [false, false, false, false];
+    Object.values(engine.materiales).forEach(mat => {
+        let inv = mat.inventarioActual;
 
-    let rollingInv = initialInvLiters;
-    for (let w = 0; w < 4; w++) {
-        weeklyInventoryInitial[w] = rollingInv;
-        
-        // Use actual produced liters from history/tanks for the total production
-        const producedL = weeklyProducedLiters[w];
-        weeklyTotalProduction[w] = producedL;
-        
-        // Calculate weeklyForecastProduction as whatever is produced that is not Barril/Overflow
-        weeklyForecastProduction[w] = Math.max(0, producedL - weeklyBarrilDemand[w] - weeklyOverflowLiters[w]);
-        
-        const demanda = weeklyDemandTotal[w];
-        weeklyInventoryFinal[w] = Math.max(0, rollingInv + weeklyTotalProduction[w] - demanda);
-        weeklyBalance[w] = weeklyInventoryFinal[w] - rollingInv;
-        
-        const capSemana = customWeeklyCapacities[w] || systemParameters.capacidadSemanalTotal;
-        weeklyDeficit[w] = weeklyTotalProduction[w] > capSemana;
-        weeklyCapacityUtilization[w] = capSemana > 0
-            ? Math.round((weeklyTotalProduction[w] / capSemana) * 1000) / 10
-            : 0;
-        rollingInv = weeklyInventoryFinal[w];
-    }
+        for (let w = 0; w < 4; w++) {
+            let reqBruto = 0;
+            Object.values(engine.productos).forEach(prodItem => {
+                const pId = prodItem.producto.id;
+                const pmp = prodItem.pmpLotes[w];
+                const recipe = recipes.find(r => r.productId === pId);
+                let saborReq = 0;
+                if (recipe) {
+                    const ing = recipe.ingredients.find(i => i.ingredientProductId === mat.material.id);
+                    if (ing) saborReq = (ing.qtyPerUnit * pmp);
+                }
 
-    // 2. Calcular MPS
-    let totalLiters = 0;
-    let lotesPorSemana = [0, 0, 0, 0];
-    const invProjectedPT = {};
+                if (!mat.requerimientosPorSabor[pId]) mat.requerimientosPorSabor[pId] = [0, 0, 0, 0];
+                mat.requerimientosPorSabor[pId][w] = saborReq;
+                reqBruto += saborReq;
+            });
 
+            mat.requerimientoBruto[w] = reqBruto;
+            let invProyectado = inv - reqBruto;
+
+            if (invProyectado <= mat.material.safetyStock) {
+                let reqNeto = mat.material.safetyStock - invProyectado + reqBruto;
+                let ordenLanzada = Math.ceil(reqNeto / mat.material.purchaseUnit) * mat.material.purchaseUnit;
+                mat.pedidosLanzados[w] = ordenLanzada;
+                invProyectado += ordenLanzada;
+
+                let semanaLanzamiento = (w + 1) - mat.material.leadTime;
+                mat.semanaLanzamiento[w] = semanaLanzamiento;
+            }
+
+            mat.inventarioProyectado[w] = invProyectado;
+            inv = invProyectado;
+        }
+    });
+}
+
+function renderMPS() {
+    const mpsContainer = document.getElementById('mps-table-container');
+    if (!mpsContainer) return;
+
+    const engine = window.mpsEngine;
     const weekHeaders = [0, 1, 2, 3].map(w => getWeekLabel(getDateForWeekOffset(w)));
 
-    let mpsHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+    const saborId = engine.globales.saborSeleccionado || "all";
+    let productosAVisualizar = Object.values(engine.productos);
+    if (saborId !== "all") productosAVisualizar = productosAVisualizar.filter(p => p.producto.id == saborId);
+
+    let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
         <thead>
             <tr class="bg-[#005B3A] text-white">
                 <th class="p-2 border">Sabor</th>
-                <th class="p-2 border text-center">${weekHeaders[0]} (Barril)</th>
-                <th class="p-2 border text-center">${weekHeaders[1]} (Barril)</th>
-                <th class="p-2 border text-center">${weekHeaders[2]} (Botellas)</th>
-                <th class="p-2 border text-center">${weekHeaders[3]} (Botellas)</th>
+                <th class="p-2 border text-center">Semana 1 </th>
+                <th class="p-2 border text-center">Semana 2 </th>
+                <th class="p-2 border text-center">Semana 3 </th>
+                <th class="p-2 border text-center">Semana 4 </th>
                 <th class="p-2 border text-center">Total Litros</th>
             </tr>
         </thead>
         <tbody>`;
 
-    finalProducts.forEach(p => {
-        invProjectedPT[p.id] = [0, 0, 0, 0];
-    });
-
-    finalProducts.forEach(p => {
-        let rollingInvL = p.quantity * getProductVolumePerUnit(p); // Starts at 16.5 L
-        let pmpDetails = [];
-
+    productosAVisualizar.forEach(item => {
+        let cells = '';
+        let rowTotal = 0;
         for (let w = 0; w < 4; w++) {
-            const unitVolume = getProductVolumePerUnit(p);
-            const litrosProducir = mpsPlan[p.id][w];
+            let pmp = item.pmpLotes[w];
+            rowTotal += pmp;
+            let classColor = pmp > 0 ? 'bg-green-100 font-bold' : 'hover:bg-gray-50';
 
-            // Calculate demand in liters for this week
-            const fixedL = demandBarril[p.id][w];
-            let forecastL = demandBotellas[p.id][w] * unitVolume;
-            if (w === 2) {
-                // Consolidate Week 3 and Week 4 forecasts under Week 3
-                forecastL += demandBotellas[p.id][3] * unitVolume;
-            } else if (w === 3) {
-                forecastL = 0;
-            }
-            
-            const demandaL = fixedL + forecastL;
-            const displayedDemand = Math.round(demandaL);
-            
-            rollingInvL = Math.round((rollingInvL + litrosProducir - displayedDemand) * 10) / 10;
-
-            let demandStr = `Demanda = ${displayedDemand} L`;
-            if (w === 3) {
-                if (p.name === "Golden Ale" || p.name === "Iris Red Ale") {
-                    demandStr = "Demanda = 0 bot";
-                } else {
-                    demandStr = "Demanda = 0 L";
-                }
-            }
-
-            let detail = `${litrosProducir} L<br><span class="text-xs text-gray-500">${demandStr}<br>Overflow: +${formatDecimal(rollingInvL, 1)} L</span>`;
-
-            lotesPorSemana[w] += Math.ceil(litrosProducir / LITROS_POR_LOTE);
-            totalLiters += litrosProducir;
-            pmpDetails.push(detail);
+            cells += `<td class="p-2 border text-center cursor-pointer ${classColor}" 
+                          onclick="editMPS(${item.producto.id}, ${w}, ${pmp})">
+                        ${formatDecimal(pmp)} L
+                      </td>`;
         }
-
-        mpsHtml += `<tr>
-            <td class="p-2 border font-semibold">${p.name}</td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 0)">${pmpDetails[0]}</td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 1)">${pmpDetails[1]}</td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 2)">${pmpDetails[2]}</td>
-            <td class="p-2 border text-center cursor-pointer hover:bg-green-50" onclick="editPlanningDemand(${p.id}, 3)">${pmpDetails[3]}</td>
-            <td class="p-2 border text-center font-bold">${mpsPlan[p.id].reduce((a, b) => a + b, 0)} L</td>
+        html += `<tr>
+            <td class="p-2 border font-semibold">${item.producto.name}</td>
+            ${cells}
+            <td class="p-2 border text-center font-bold bg-gray-50">${formatDecimal(rowTotal)} L</td>
         </tr>`;
     });
 
-    mpsHtml += `<tr class="bg-gray-100">
-        <td class="p-2 border font-bold text-right text-gray-600">Lotes a Iniciar (CRP):</td>`;
-    let isOverCapacity = false;
-    for (let w = 0; w < 4; w++) {
-        let l = lotesPorSemana[w];
-        const maxTanksThisWeek = customWeeklyCapacities[w] / LITROS_POR_LOTE;
-        let alertClass = l > maxTanksThisWeek ? 'text-red-600 font-bold bg-red-100' : 'text-green-600 font-bold';
-        if (l > maxTanksThisWeek) isOverCapacity = true;
-        mpsHtml += `<td class="p-2 border text-center ${alertClass}">${l} / ${maxTanksThisWeek} Tanques</td>`;
+    html += `</tbody></table>`;
+    mpsContainer.innerHTML = html;
+}
+
+window.editMPS = function editMPS(productoId, weekIndex, currentVal) {
+    const valInput = prompt(`Ingrese el nuevo valor del MPS (L) para la Semana ${weekIndex + 1}.\n(Deje en blanco para usar el cálculo automático):`, currentVal);
+    if (valInput === null) return;
+
+    if (!customMpsOverrides) customMpsOverrides = {};
+    if (!customMpsOverrides[productoId]) customMpsOverrides[productoId] = [undefined, undefined, undefined, undefined];
+
+    if (valInput.trim() === "") {
+        customMpsOverrides[productoId][weekIndex] = undefined;
+    } else {
+        const newVal = parseFloat(valInput);
+        if (isNaN(newVal) || newVal < 0) {
+            showNotification('Por favor ingrese un valor numérico válido mayor o igual a 0.', 'error');
+            return;
+        }
+        customMpsOverrides[productoId][weekIndex] = newVal;
     }
-    mpsHtml += `<td class="p-2 border"></td></tr></tbody></table>`;
 
-    if (isOverCapacity) {
-        mpsHtml = `<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4 font-bold">
-            <i class="fas fa-exclamation-triangle"></i> ALERTA CRÍTICA: Se ha excedido la capacidad máxima de producción.
-        </div>` + mpsHtml;
+    saveData();
+    runProductionFlow();
+    showNotification('MPS actualizado.', 'success');
+};
+
+window.saveMpsCellEditFromModal = function() {
+    const modal = document.getElementById('edit-planning-modal');
+    if (!modal) return;
+    const pid = Number(modal.dataset.productId);
+    const w = Number(modal.dataset.weekIdx);
+    const input = document.getElementById('edit-planning-value');
+    const val = Number(input.value);
+    
+    if (isNaN(val) || val < 0) {
+        showNotification('Valor inválido', 'error');
+        return;
     }
+    
+    if (!customMpsOverrides[pid]) customMpsOverrides[pid] = [undefined, undefined, undefined, undefined];
+    customMpsOverrides[pid][w] = val;
+    
+    saveData();
+    runProductionFlow();
+    closeEditPlanningModal();
+};
 
-    if (mpsContainer) mpsContainer.innerHTML = mpsHtml;
+function renderMRP() {
+    const mrpContainer = document.getElementById('mrp-table-container');
+    if (!mrpContainer) return;
 
-    // 3. Calcular MRP
-    let mrpHtml = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
+    const engine = window.mpsEngine;
+    const weekHeaders = [0, 1, 2, 3].map(w => getWeekLabel(getDateForWeekOffset(w)));
+    const saborId = engine.globales.saborSeleccionado || "all";
+
+    let html = `<table class="w-full text-left border-collapse border border-gray-200 text-sm">
         <thead>
-            <tr class="bg-[#005B3A] text-white">
-                <th class="p-2 border">Materia Prima</th>
-                <th class="p-2 border text-center bg-[#00422a]">Stock Inicial</th>
+            <tr class="bg-[#1a1a2e] text-white">
+                <th class="p-2 border">Material</th>
+                <th class="p-2 border text-center bg-[#00422a]">Inv. Inicial</th>
                 <th class="p-2 border text-center">${weekHeaders[0]}</th>
                 <th class="p-2 border text-center">${weekHeaders[1]}</th>
                 <th class="p-2 border text-center">${weekHeaders[2]}</th>
@@ -1581,81 +1787,92 @@ function runProductionFlow(force = false) {
         </thead>
         <tbody>`;
 
-    rawMaterials.forEach(rm => {
-        let inv = rm.quantity;
-        let cellsHtml = '';
-
+    Object.values(engine.materiales).forEach(mat => {
+        let cells = '';
+        let inv = mat.inventarioActual;
         for (let w = 0; w < 4; w++) {
             let reqBruto = 0;
-            finalProducts.forEach(p => {
-                const recipe = recipes.find(r => r.productId === p.id);
-                if (recipe) {
-                    const ing = recipe.ingredients.find(i => i.ingredientProductId === rm.id);
-                    if (ing) {
-                        reqBruto += ing.qtyPerUnit * mpsPlan[p.id][w];
-                    }
-                }
-            });
+            if (saborId === "all") {
+                reqBruto = mat.requerimientoBruto[w];
+            } else {
+                reqBruto = mat.requerimientosPorSabor[saborId] ? mat.requerimientosPorSabor[saborId][w] : 0;
+            }
+            let invProyectado = mat.inventarioProyectado[w];
+            let pedLanzado = mat.pedidosLanzados[w];
+            let enDeficit = invProyectado < 0;
 
-            let invProyectado = inv - reqBruto;
-            let reqNeto = 0;
-            let ordenLanzada = 0;
-            let aPedirEn = "";
+            let reqClass = reqBruto > 0 ? 'text-red-600 font-bold' : 'text-gray-500';
+            let invClass = enDeficit ? 'bg-red-100 text-red-700 font-bold' : (invProyectado <= mat.material.minStock ? 'bg-yellow-100' : '');
 
-            if (invProyectado <= rm.safetyStock) {
-                reqNeto = rm.safetyStock - invProyectado + reqBruto;
-                ordenLanzada = Math.ceil(reqNeto / rm.purchaseUnit) * rm.purchaseUnit;
-                invProyectado += ordenLanzada;
-
-                let dt = rm.leadTime;
-                let semanaLanzamiento = (w + 1) - dt;
-
-                if (semanaLanzamiento <= 0) {
-                    aPedirEn = `<div class="mt-1 text-[10px] bg-red-100 text-red-800 p-1 rounded font-bold">¡URGENTE! ${ordenLanzada.toFixed(0)}</div>
-                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 text-white py-0.5 px-1 rounded font-bold"><i class="fas fa-truck-loading"></i> Recargar</button>`;
+            let aPedirEn = '';
+            if (pedLanzado > 0) {
+                let semanaLanzar = mat.semanaLanzamiento[w];
+                if (semanaLanzar >= 0) {
+                    aPedirEn = `<div class="text-[10px] text-blue-700 font-bold mt-1 bg-blue-100 rounded px-1">
+                        Pedir en Sem ${semanaLanzar + 1} (${formatDecimal(pedLanzado)} ${mat.material.unit})
+                    </div>`;
                 } else {
-                    aPedirEn = `<div class="mt-1 text-[10px] bg-amber-100 text-amber-800 p-1 rounded font-bold">Pedir Sem ${semanaLanzamiento}: ${ordenLanzada.toFixed(0)}</div>
-                    <button onclick="quickRestock(${rm.id}, ${ordenLanzada})" class="w-full text-[10px] bg-blue-500 text-white py-0.5 px-1 rounded font-bold"><i class="fas fa-truck-loading"></i> Recargar</button>`;
+                    aPedirEn = `<div class="text-[10px] text-red-700 font-bold mt-1 bg-red-200 rounded px-1">
+                        ¡PEDIR URGENTE YA! (${formatDecimal(pedLanzado)} ${mat.material.unit})
+                    </div>`;
                 }
             }
 
-            cellsHtml += `<td class="p-2 border text-center text-xs">
-                Req: <span class="text-red-600">${formatDecimal(reqBruto)}</span><br>
-                Inv: <span class="text-blue-600">${formatDecimal(invProyectado)}</span>
+            cells += `<td class="p-2 border align-top hover:bg-gray-50">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs text-gray-500">Req:</span>
+                    <span class="text-sm ${reqClass}">${formatDecimal(reqBruto)}</span>
+                </div>
+                <div class="flex justify-between items-center bg-gray-50 p-1 rounded">
+                    <span class="text-xs text-gray-500">Inv:</span>
+                    <span class="text-sm ${invClass}">${formatDecimal(invProyectado)}</span>
+                </div>
                 ${aPedirEn}
             </td>`;
-            inv = invProyectado;
         }
 
-        mrpHtml += `<tr>
-            <td class="p-2 border font-semibold">${rm.name}</td>
-            <td class="p-2 border text-center bg-gray-50 font-bold">${formatDecimal(rm.quantity)}</td>
-            ${cellsHtml}
+        html += `<tr>
+            <td class="p-2 border font-semibold">${mat.material.name}</td>
+            <td class="p-2 border text-center bg-gray-50 font-bold">${formatDecimal(mat.material.quantity)}</td>
+            ${cells}
         </tr>`;
     });
-    mrpHtml += `</tbody></table>`;
 
-    if (mrpContainer) mrpContainer.innerHTML = mrpHtml;
+    html += `</tbody></table>`;
+    mrpContainer.innerHTML = html;
+}
 
-    const volumeTable = document.getElementById('production-volume-table');
-    const weeklyVolumeTable = document.getElementById('weekly-volume-table-container');
-    const demandTable = document.getElementById('production-demand-table');
 
-    const adjustedOverflowLiters = [...weeklyOverflowLiters];
+function renderVolumenes() {
+    const engine = window.mpsEngine;
+    const volumeTable = document.getElementById("production-volume-table");
+    const weeklyVolumeTable = document.getElementById("weekly-volume-table-container");
 
-    // 4. Renderizar Tabla de Volúmenes (MODIFICADA - "Overflow (L)" en lugar de "Overflow Embotellado")
+    const saborId = engine.globales.saborSeleccionado || "all";
+    let productosAVisualizar = Object.values(engine.productos);
+    if (saborId !== "all") productosAVisualizar = productosAVisualizar.filter(p => p.producto.id == saborId);
+
     if (volumeTable || weeklyVolumeTable) {
-        const barrilTotal = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
-        const overflowTotalLiters = adjustedOverflowLiters.reduce((a, b) => a + b, 0);
-        const forecastProdTotal = weeklyForecastProduction.reduce((a, b) => a + b, 0);
-        const producedTotal = weeklyTotalProduction.reduce((a, b) => a + b, 0);
+        let pronosticos = [0, 0, 0, 0];
+        let pedidosFijos = [0, 0, 0, 0];
+        let overflowSemanas = [0, 0, 0, 0];
+
+        productosAVisualizar.forEach(prod => {
+            for (let w = 0; w < 4; w++) {
+                pedidosFijos[w] += prod.demandaPedidos[w];
+                pronosticos[w] += prod.demandaPronostico[w];
+                overflowSemanas[w] += (prod.pmpLotes[w] > prod.demandaTotal[w] ? prod.pmpLotes[w] - prod.demandaTotal[w] : 0);
+            }
+        });
+
+        const barrilTotal = pedidosFijos.reduce((a, b) => a + b, 0);
+        const overflowTotalLiters = overflowSemanas.reduce((a, b) => a + b, 0);
+        const forecastProdTotal = pronosticos.reduce((a, b) => a + b, 0);
+        const producedTotal = barrilTotal + overflowTotalLiters + forecastProdTotal;
+
         const pctRow = (val) => {
             const p = (val / (producedTotal || 1)) * 100;
             return p % 1 === 0 ? p.toFixed(0) : p.toFixed(1);
-        };
-
-        const forecastCell = (w) => {
-            return `<td class="p-2 border text-center">${formatDecimal(weeklyForecastProduction[w])} L</td>`;
         };
 
         const tableHtml = `
@@ -1673,26 +1890,26 @@ function runProductionFlow(force = false) {
                 </thead>
                 <tbody>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">🔵 Pedidos Fijos — Barril (L)</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[w])} L</td>`).join('')}
+                        <td class="p-2 border font-semibold text-[13px]">Ã°Å¸â€Âµ Pedidos Fijos — Barril (L)</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center cursor-pointer hover:bg-gray-200" onclick="editGlobalVolume('barril', ${w}, ${pedidosFijos[w]})">${formatDecimal(pedidosFijos[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(barrilTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${pctRow(barrilTotal)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold text-[13px]">🟠 Overflow (L)</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(adjustedOverflowLiters[w])} L</td>`).join('')}
+                        <td class="p-2 border font-semibold text-[13px]">Ã°Å¸Å¸Â  Overflow (L)</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center cursor-pointer hover:bg-gray-200" onclick="editGlobalVolume('overflow', ${w}, ${overflowSemanas[w]})">${formatDecimal(overflowSemanas[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(overflowTotalLiters)} L</td>
                         <td class="p-2 border text-center font-semibold">${pctRow(overflowTotalLiters)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold text-[13px]">🟢 Producción según pronóstico (L)</td>
-                        ${[0, 1, 2, 3].map(w => forecastCell(w)).join('')}
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center cursor-pointer hover:bg-gray-200" onclick="editGlobalVolume('forecast', ${w}, ${pronosticos[w]})">${formatDecimal(pronosticos[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-green-50">${formatDecimal(forecastProdTotal)} L</td>
                         <td class="p-2 border text-center font-semibold">${pctRow(forecastProdTotal)}%</td>
                     </tr>
                     <tr class="bg-[#1a1a2e] text-white">
-                        <td class="p-2 border font-bold text-sm">⚡ PRODUCCIÓN TOTAL PLANIFICADA (L)</td>
-                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[w] + adjustedOverflowLiters[w])} L</td>`).join('')}
+                        <td class="p-2 border font-bold text-sm">⚠️¡ PRODUCCIÃƒâ€œN TOTAL PLANIFICADA (L)</td>
+                        ${[0, 1, 2, 3].map(w => `<td class="p-2 border text-center">${formatDecimal(pedidosFijos[w] + overflowSemanas[w] + pronosticos[w])} L</td>`).join('')}
                         <td class="p-2 border text-center font-bold bg-[#005B3A]">${formatDecimal(producedTotal)} L</td>
                         <td class="p-2 border text-center font-bold">100%</td>
                     </tr>
@@ -1702,25 +1919,167 @@ function runProductionFlow(force = false) {
         if (volumeTable) volumeTable.innerHTML = tableHtml;
         if (weeklyVolumeTable) weeklyVolumeTable.innerHTML = tableHtml;
     }
+}
 
-    const initialInvTable = document.getElementById('production-initial-inventory-table');
+function renderKPIs() {
+    const kpiContainer = document.getElementById("kpi-container");
+    if (!kpiContainer) return;
+
+    const engine = window.mpsEngine;
+    const saborId = engine.globales.saborSeleccionado || "all";
+    let productosAVisualizar = Object.values(engine.productos);
+    if (saborId !== "all") productosAVisualizar = productosAVisualizar.filter(p => p.producto.id == saborId);
+
+    let totalProduced = 0;
+    let totalDemandKpi = 0;
+    let finalInventory = 0;
+    let demandBarrilMes = 0;
+    let demandForecastMes = 0;
+    let hasInventoryDeficit = false;
+
+    productosAVisualizar.forEach(prod => {
+        totalProduced += prod.pmpLotes.reduce((a, b) => a + b, 0);
+        totalDemandKpi += prod.demandaTotal.reduce((a, b) => a + b, 0);
+        finalInventory += prod.inventarioFinal[3];
+        demandBarrilMes += prod.demandaPedidos.reduce((a, b) => a + b, 0);
+        demandForecastMes += prod.demandaPronostico.reduce((a, b) => a + b, 0);
+        if (prod.inventarioFinal.some(v => v < 0)) hasInventoryDeficit = true;
+    });
+
+
+    const totalDemandaGeneral = demandBarrilMes + demandForecastMes || 1;
+    const pctPedidosFijos = Math.round((demandBarrilMes / totalDemandaGeneral) * 100);
+    const pctPronosticos = Math.round((demandForecastMes / totalDemandaGeneral) * 100);
+    const utilSemanas = engine.globales.utilizacionCapacidad.map((u, i) => `S${i + 1}: ${u}%`).join(' · ');
+    const finalInventoryBottles = Math.floor(finalInventory / systemParameters.tamanoBotella);
+
+    kpiContainer.innerHTML = `
+        <div class="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center shadow-sm">
+            <p class="text-xs text-green-800 font-bold mb-1">Producción Total Planificada</p>
+            <p class="text-2xl font-black text-green-600">${formatDecimal(totalProduced)} L</p>
+            <p class="text-xs text-gray-600 mt-1">Demanda mes: ${formatDecimal(totalDemandKpi)} L</p>
+        </div>
+        <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
+            <p class="text-xs text-blue-800 font-bold mb-1">Capacidad Utilizada</p>
+            <p class="text-2xl font-black text-blue-600">${engine.globales.utilizacionGlobal}%</p>
+            <p class="text-xs text-gray-600 mt-1">Fórmula: Producido / ${systemParameters.capacidadSemanalTotal} L</p>
+        </div>
+        <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
+            <p class="text-xs text-purple-800 font-bold mb-2">Participación por Tipo</p>
+            <div class="space-y-1 text-xs text-gray-700">
+                <p>Ã°Å¸â€ Âµ Pedidos fijos: ${pctPedidosFijos}%</p>
+                <p>🟢 Pronósticos: ${pctPronosticos}%</p>
+            </div>
+        </div>
+        <div class="flex-1 ${hasInventoryDeficit ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} p-4 rounded-lg border text-center shadow-sm">
+            <p class="text-xs ${hasInventoryDeficit ? 'text-red-800' : 'text-emerald-800'} font-bold mb-1">Inv. Final Proyectado</p>
+            <p class="text-2xl font-black ${hasInventoryDeficit ? 'text-red-600' : 'text-emerald-600'}">${formatDecimal(finalInventory)} L</p>
+            <p class="text-sm font-bold ${hasInventoryDeficit ? 'text-red-600' : 'text-emerald-600'}">${finalInventoryBottles} bot</p>
+            <p class="text-xs ${hasInventoryDeficit ? 'text-red-700' : 'text-emerald-700'} font-semibold mt-1">${hasInventoryDeficit ? '⚠️ Déficit detectado. ¡Programar más lotes!' : '✅ Stock suficiente'}</p>
+        </div>
+    `;
+}
+
+
+window.cambiarSaborGlobal = function (saborId) {
+    if (window.mpsEngine && window.mpsEngine.globales) {
+        window.mpsEngine.globales.saborSeleccionado = saborId;
+        actualizarDashboardEngine();
+    }
+};
+
+function actualizarOpcionesSabor() {
+    const engine = window.mpsEngine;
+    const select = document.getElementById("flavor-select");
+    if (!select) return;
+
+    // Save current selection if valid
+    const currentVal = engine.globales.saborSeleccionado || "all";
+
+    let html = `<option value="all">Todas las Cervezas (Global)</option>`;
+    Object.values(engine.productos).forEach(item => {
+        html += `<option value="${item.producto.id}">${item.producto.name}</option>`;
+    });
+
+    select.innerHTML = html;
+    select.value = currentVal;
+}
+
+function actualizarDashboardEngine() {
+    actualizarOpcionesSabor();
+    renderMPS();
+    renderMRP();
+    renderVolumenes();
+    renderKPIs();
+    renderTablasExtra();
+
+    const out = document.getElementById('production-output');
+    if (out) out.innerHTML = `<div class="text-green-700 font-bold bg-green-50 p-3 border border-green-200 rounded"><i class="fas fa-check-circle mr-1"></i> Cálculo MRP y MPS finalizado mediante Motor Industrial Centralizado.</div>`;
+}
+
+function ejecutarMPSMRP(force = false) {
+    if (force) {
+        window._mpsMrpCalculated = true;
+    }
+
+    if (!window._mpsMrpCalculated) {
+        const out = document.getElementById('production-output');
+        if (out) {
+            out.innerHTML = `<p class="text-gray-500 italic text-sm">Haz clic en "Ejecutar Cálculo MPS/MRP" para simular la planeación basada en pedidos, pronósticos y recetas.</p>`;
+        }
+        ['mps-table-container', 'mrp-table-container', 'kpi-container', 'production-volume-table', 'weekly-volume-table-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '';
+        });
+        return;
+    }
+
+    const out = document.getElementById('production-output');
+    if (out) out.innerHTML = '<div class="text-blue-600 font-bold"><i class="fas fa-spinner fa-spin mr-2"></i> Procesando Motor Industrial...</div>';
+
+    try {
+        inicializarMotorData();
+        calcularDemandaEngine();
+        recopilarProduccionPrevia();
+        calcularInventariosYPMP();
+        calcularMRPEngine();
+        actualizarDashboardEngine();
+    } catch (err) {
+        console.error("Error en ejecutarMPSMRP:", err);
+        if (out) out.innerHTML = `<div class="text-red-700 font-bold">Error en simulación: ${err.message}</div>`;
+    }
+}
+
+// Alias público
+window.runProductionFlow = ejecutarMPSMRP;
+window.ejecutarMPSMRP = ejecutarMPSMRP;
+
+function renderTablasExtra() {
+    const engine = window.mpsEngine;
+
+    const saborId = engine.globales.saborSeleccionado || "all";
+    let productosAVisualizar = Object.values(engine.productos);
+    if (saborId !== "all") productosAVisualizar = productosAVisualizar.filter(p => p.producto.id == saborId);
+
+    const initialInvTable = document.getElementById("production-initial-inventory-table");
     if (initialInvTable) {
         let totalUnits = 0;
         let totalLitersInv = 0;
-        let rowsHtml = finalProducts.map(p => {
+        let rowsHtml = Object.values(engine.productos).map(item => {
+            const p = item.producto;
             const units = p.quantity || 0;
-            const liters = units * getProductVolumePerUnit(p);
+            const liters = item.inventarioInicial[0];
             const bottles = litersToBottles(liters);
             totalUnits += units;
             totalLitersInv += liters;
             return `<tr>
                 <td class="p-2 border font-semibold">${p.name}</td>
-                <td class="p-2 border text-center">${p.sku || '—'}</td>
+                <td class="p-2 border text-center">${p.sku || "—"}</td>
                 <td class="p-2 border text-center">${formatDecimal(units)}</td>
                 <td class="p-2 border text-center">${formatDecimal(liters)} L</td>
                 <td class="p-2 border text-center">${bottles} bot</td>
             </tr>`;
-        }).join('');
+        }).join("");
 
         initialInvTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
@@ -1734,7 +2093,7 @@ function runProductionFlow(force = false) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${rowsHtml || '<tr><td colspan="5" class="p-4 text-center text-gray-500 italic">Sin productos terminados en inventario.</td></tr>'}
+                    ${rowsHtml || "<tr><td colspan=\"5\" class=\"p-4 text-center text-gray-500 italic\">Sin productos terminados en inventario.</td></tr>"}
                     <tr class="bg-gray-100 font-bold">
                         <td class="p-2 border text-right" colspan="2">TOTAL INVENTARIO INICIAL</td>
                         <td class="p-2 border text-center">${formatDecimal(totalUnits)}</td>
@@ -1743,15 +2102,17 @@ function runProductionFlow(force = false) {
                     </tr>
                 </tbody>
             </table>
-            <p class="text-xs text-gray-500 mt-2">Base para la proyección de las 4 semanas. Semana 1 inicia con <strong>${formatDecimal(initialInvLiters)} L</strong> (${litersToBottles(initialInvLiters)} bot) consolidados.</p>
+            <p class="text-xs text-gray-500 mt-2">Base para la proyecci—n de las 4 semanas. Semana 1 inicia con <strong>${formatDecimal(totalLitersInv)} L</strong> (${litersToBottles(totalLitersInv)} bot) consolidados.</p>
         `;
     }
 
+    const demandTable = document.getElementById("production-demand-table");
     if (demandTable) {
-        const barrilTotal = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
-        const forecastTotal = weeklyForecastLiters.reduce((a, b) => a + b, 0);
+        const barrilTotal = engine.globales.demandaSemanalPedidos.reduce((a, b) => a + b, 0);
+        const forecastTotal = engine.globales.demandaSemanalPronostico.reduce((a, b) => a + b, 0);
         const totalDemand = barrilTotal + forecastTotal;
         const pctDemand = (val) => Math.round((val / (totalDemand || 1)) * 100);
+
         demandTable.innerHTML = `
             <table class="w-full text-left border-collapse border border-gray-200 text-sm">
                 <thead class="bg-[#005B3A] text-white">
@@ -1768,19 +2129,19 @@ function runProductionFlow(force = false) {
                 <tbody>
                     <tr class="bg-gray-50">
                         <td class="p-2 border font-semibold">Pedidos fijos — Barril (L)</td>
-                        ${weeklyBarrilDemand.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        ${engine.globales.demandaSemanalPedidos.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join("")}
                         <td class="p-2 border text-center font-bold">${formatDecimal(barrilTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${pctDemand(barrilTotal)}%</td>
                     </tr>
                     <tr class="bg-gray-50">
-                        <td class="p-2 border font-semibold">Pronósticos (L)</td>
-                        ${weeklyForecastLiters.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join('')}
+                        <td class="p-2 border font-semibold">Pron—sticos (L)</td>
+                        ${engine.globales.demandaSemanalPronostico.map(v => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join("")}
                         <td class="p-2 border text-center font-bold">${formatDecimal(forecastTotal)}</td>
                         <td class="p-2 border text-center font-semibold">${pctDemand(forecastTotal)}%</td>
                     </tr>
                     <tr class="font-bold bg-[#f8fafc]">
                         <td class="p-2 border font-semibold">TOTAL (L)</td>
-                        ${weeklyBarrilDemand.map((_, i) => `<td class="p-2 border text-center">${formatDecimal(weeklyBarrilDemand[i] + weeklyForecastLiters[i])}</td>`).join('')}
+                        ${engine.globales.demandaSemanalTotal.map((v, i) => `<td class="p-2 border text-center">${formatDecimal(v)}</td>`).join("")}
                         <td class="p-2 border text-center font-bold">${formatDecimal(totalDemand)}</td>
                         <td class="p-2 border text-center font-semibold">100%</td>
                     </tr>
@@ -1788,81 +2149,8 @@ function runProductionFlow(force = false) {
             </table>
         `;
     }
-
-    if (kpiContainer) {
-        const totalProduced = weeklyTotalProduction.reduce((a, b) => a + b, 0);
-        const totalDemandKpi = weeklyDemandTotal.reduce((a, b) => a + b, 0);
-        const finalInventory = weeklyInventoryFinal[3];
-        const finalInventoryBottles = litersToBottles(finalInventory);
-        const hasDeficit = weeklyDeficit.some(d => d);
-        const demandBarrilMes = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
-        const demandForecastMes = weeklyForecastLiters.reduce((a, b) => a + b, 0);
-        const totalDemandaGeneral = demandBarrilMes + demandForecastMes || 1;
-        const pctPedidosFijos = Math.round((demandBarrilMes / totalDemandaGeneral) * 100);
-        const pctPronosticos = Math.round((demandForecastMes / totalDemandaGeneral) * 100);
-        const utilSemanas = weeklyCapacityUtilization.map((u, i) => `S${i + 1}: ${u}%`).join(' · ');
-
-        kpiContainer.innerHTML = `
-            <div class="flex-1 bg-green-50 p-4 rounded-lg border border-green-200 text-center shadow-sm">
-                <p class="text-xs text-green-800 font-bold mb-1">Producción Total Planificada</p>
-                <p class="text-2xl font-black text-green-600">${formatDecimal(totalProduced)} L</p>
-                <p class="text-xs text-gray-600 mt-1">Demanda mes: ${formatDecimal(totalDemandKpi)} L</p>
-            </div>
-            <div class="flex-1 bg-blue-50 p-4 rounded-lg border border-blue-200 text-center shadow-sm">
-                <p class="text-xs text-blue-800 font-bold mb-1">% Utilización Capacidad</p>
-                <p class="text-lg font-black text-blue-600 leading-tight">${utilSemanas}</p>
-                <p class="text-xs text-gray-600 mt-1">Fórmula: Producido ÷ ${systemParameters.capacidadSemanalTotal} L</p>
-            </div>
-            <div class="flex-1 bg-purple-50 p-4 rounded-lg border border-purple-200 text-center shadow-sm">
-                <p class="text-xs text-purple-800 font-bold mb-2">Participación por Tipo</p>
-                <div class="space-y-1 text-xs text-gray-700">
-                    <p>🔵 Pedidos fijos: ${pctPedidosFijos}%</p>
-                    <p>🟢 Pronósticos: ${pctPronosticos}%</p>
-                </div>
-            </div>
-            <div class="flex-1 ${hasDeficit ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} p-4 rounded-lg border text-center shadow-sm">
-                <p class="text-xs ${hasDeficit ? 'text-red-800' : 'text-emerald-800'} font-bold mb-1">Inv. Final Proyectado</p>
-                <p class="text-2xl font-black ${hasDeficit ? 'text-red-600' : 'text-emerald-600'}">${formatDecimal(finalInventory)} L</p>
-                <p class="text-sm font-bold ${hasDeficit ? 'text-red-600' : 'text-emerald-600'}">${finalInventoryBottles} bot</p>
-                <p class="text-xs ${hasDeficit ? 'text-red-700' : 'text-emerald-700'} font-semibold mt-1">${hasDeficit ? '⚠️ Excede capacidad semanal' : '✅ Dentro de capacidad'}</p>
-            </div>
-        `;
-    }
-
-    try {
-        const barrilDemMes = weeklyBarrilDemand.reduce((a, b) => a + b, 0);
-        const forecastDemMes = weeklyForecastLiters.reduce((a, b) => a + b, 0);
-        const demandaGeneralMes = barrilDemMes + forecastDemMes;
-        window._lastProductionCalc = {
-            litrosProducidosSemanas: weeklyTotalProduction,
-            litrosProducidosTotal: weeklyTotalProduction.reduce((a, b) => a + b, 0),
-            litrosProducidosPorcentajes: weeklyTotalProduction.map(v =>
-                Math.round((v / (weeklyTotalProduction.reduce((a, b) => a + b, 0) || 1)) * 100)
-            ),
-            resumenDemandaSemanas: {
-                pedidosFijos: weeklyBarrilDemand,
-                pronosticos: weeklyForecastLiters,
-                totalPorSemana: weeklyDemandTotal
-            },
-            produccionTotalPlanificada: weeklyTotalProduction,
-            inventarioFinalProyectado: {
-                litros: weeklyInventoryFinal[3],
-                botellas: litersToBottles(weeklyInventoryFinal[3])
-            },
-            utilizacionCapacidadSemanal: weeklyCapacityUtilization,
-            participacionPorTipo: {
-                pedidosFijosPct: Math.round((barrilDemMes / (demandaGeneralMes || 1)) * 100),
-                pronosticosPct: Math.round((forecastDemMes / (demandaGeneralMes || 1)) * 100)
-            },
-            weeklyProducedLiters,
-            weeklyForecastProduction,
-            adjustedOverflowLiters
-        };
-        window.getProductionPlanningReport = () => JSON.stringify(window._lastProductionCalc, null, 2);
-    } catch (e) { console.error('debug export failed', e); }
-
-    out.innerHTML = `<div class="text-green-700 font-bold bg-green-50 p-3 border border-green-200 rounded"><i class="fas fa-check-circle mr-1"></i> Cálculo MRP y MPS finalizado. Validaciones completadas.</div>`;
 }
+
 
 function editPlanningDemand(productId, weekIndex) {
     const product = inventory.find(p => p.id === productId);
@@ -1870,8 +2158,10 @@ function editPlanningDemand(productId, weekIndex) {
 
     const isBarril = weekIndex < 2;
     const title = isBarril
-        ? `Editar Pedido Fijo (Barril) para ${product.name} en Semana ${weekIndex + 1} (Litros):`
-        : `Editar Pronóstico (Botellas) para ${product.name} en Semana ${weekIndex + 1} (Unidades):`;
+        ? `Editar Pedido Fijo (Barril) para ${product.name} en Semana ${weekIndex + 1}`
+        : `Editar Pronóstico (Botellas) para ${product.name} en Semana ${weekIndex + 1}`;
+
+    const label = isBarril ? 'Cantidad (Litros)' : 'Cantidad (Unidades/Botellas)';
 
     let currentQty = 0;
     const today = new Date();
@@ -1896,13 +2186,36 @@ function editPlanningDemand(productId, weekIndex) {
         currentQty = weekForecasts.reduce((sum, f) => sum + f.qty, 0);
     }
 
-    const valInput = prompt(title, currentQty);
-    if (valInput === null || valInput.trim() === "") return;
+    document.getElementById('mps-cell-edit-title').innerText = title;
+    document.getElementById('mps-cell-edit-product-id').value = productId;
+    document.getElementById('mps-cell-edit-week-index').value = weekIndex;
+    document.getElementById('mps-cell-edit-product-name').value = product.name;
+    document.getElementById('mps-cell-edit-qty-label').innerText = label;
+    document.getElementById('mps-cell-edit-qty').value = currentQty;
 
-    const newQty = parseFloat(valInput);
+    document.getElementById('mps-cell-edit-modal').classList.remove('hidden');
+}
+
+function closeMpsCellEditModal() {
+    document.getElementById('mps-cell-edit-modal').classList.add('hidden');
+    document.getElementById('mps-cell-edit-form').reset();
+}
+
+function saveMpsCellEdit(event) {
+    event.preventDefault();
+    const productId = parseInt(document.getElementById('mps-cell-edit-product-id').value);
+    const weekIndex = parseInt(document.getElementById('mps-cell-edit-week-index').value);
+    const newQty = parseFloat(document.getElementById('mps-cell-edit-qty').value);
+
     if (isNaN(newQty) || newQty < 0) {
         return showNotification('Cantidad inválida.', 'error');
     }
+
+    const product = inventory.find(p => p.id === productId);
+    if (!product) return;
+
+    const isBarril = weekIndex < 2;
+    const today = new Date();
 
     if (isBarril) {
         const volumePerUnit = product.volumePerUnit || 1;
@@ -1925,6 +2238,11 @@ function editPlanningDemand(productId, weekIndex) {
                 createdAt: new Date().toISOString()
             });
         }
+
+        // Ensure manual overrides are updated so they don't hide the new value
+        if (!customWeeklyBarrilDemand[productId]) customWeeklyBarrilDemand[productId] = [0, 0, 0, 0];
+        customWeeklyBarrilDemand[productId][weekIndex] = newQty;
+
     } else {
         forecasts = forecasts.filter(f => {
             if (f.productId !== productId) return true;
@@ -1942,12 +2260,22 @@ function editPlanningDemand(productId, weekIndex) {
                 targetDate
             });
         }
+
+        // Ensure manual overrides are updated so they don't hide the new value
+        if (!customWeeklyForecastLiters[productId]) customWeeklyForecastLiters[productId] = [0, 0, 0, 0];
+        const volumePerUnit = product.volumePerUnit || 1;
+        customWeeklyForecastLiters[productId][weekIndex] = newQty * volumePerUnit;
+
+        // Force actual production (override MPS)
+        if (!customMpsOverrides[productId]) customMpsOverrides[productId] = [0, 0, 0, 0];
+        customMpsOverrides[productId][weekIndex] = newQty * volumePerUnit;
     }
 
     saveData();
     refreshAppUI();
     renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
+    closeMpsCellEditModal();
     showNotification('Demanda actualizada y plan recalculado con éxito.', 'success');
 }
 
@@ -1968,17 +2296,110 @@ function editWeeklyCapacity(weekIndex) {
     showNotification(`Capacidad de la Semana ${weekIndex + 1} actualizada a ${newVal} L`, 'success');
 }
 
+function editGlobalVolume(type, weekIndex, currentQty) {
+    const titles = {
+        'barril': 'Pedidos Fijos — Barril',
+        'overflow': 'Overflow',
+        'forecast': 'Producción según pronóstico'
+    };
+    const title = `Editar Total: ${titles[type]} (Semana ${weekIndex + 1})`;
+    const valInput = prompt(`${title}\nIntroduce el nuevo valor total en Litros.\nNota: El cambio se distribuirá proporcionalmente entre todos los sabores.`, currentQty);
+
+    if (valInput === null || valInput.trim() === "") return;
+    const newQty = parseFloat(valInput);
+    if (isNaN(newQty) || newQty < 0) {
+        return showNotification('Cantidad inválida.', 'error');
+    }
+
+    if (type === 'overflow') {
+        customWeeklyOverflowLiters[weekIndex] = newQty;
+    } else {
+        const isBarril = type === 'barril';
+        const numProducts = inventory.length;
+
+        const today = new Date();
+        inventory.forEach(p => {
+            const prodId = p.id;
+            let oldProdQty = 0;
+
+            if (isBarril) {
+                if (customWeeklyBarrilDemand[prodId] && customWeeklyBarrilDemand[prodId][weekIndex] !== undefined) {
+                    oldProdQty = customWeeklyBarrilDemand[prodId][weekIndex];
+                } else {
+                    const weekOrders = orders.filter(o => {
+                        if (o.productId !== prodId) return false;
+                        const diffDays = Math.floor((new Date(o.dueDate) - today) / (1000 * 60 * 60 * 24));
+                        const w = Math.max(0, Math.min(3, Math.floor(diffDays / 7)));
+                        return w === weekIndex;
+                    });
+                    oldProdQty = weekOrders.reduce((sum, o) => sum + o.qty, 0) * (p.volumePerUnit || 1);
+                }
+
+                let newProdQty = 0;
+                if (currentQty > 0) {
+                    newProdQty = oldProdQty * (newQty / currentQty);
+                } else {
+                    newProdQty = newQty / numProducts;
+                }
+
+                if (!customWeeklyBarrilDemand[prodId]) customWeeklyBarrilDemand[prodId] = [0, 0, 0, 0];
+                customWeeklyBarrilDemand[prodId][weekIndex] = newProdQty;
+
+            } else {
+                // Forecast logic: Force production by setting customMpsOverrides
+                if (customMpsOverrides[prodId] && customMpsOverrides[prodId][weekIndex] !== undefined) {
+                    oldProdQty = customMpsOverrides[prodId][weekIndex];
+                } else {
+                    oldProdQty = currentQty / numProducts;
+                }
+
+                let newProdQty = 0;
+                if (currentQty > 0) {
+                    newProdQty = oldProdQty * (newQty / currentQty);
+                } else {
+                    newProdQty = newQty / numProducts;
+                }
+
+                if (!customWeeklyForecastLiters[prodId]) customWeeklyForecastLiters[prodId] = [0, 0, 0, 0];
+                customWeeklyForecastLiters[prodId][weekIndex] = newProdQty;
+
+                if (!customMpsOverrides[prodId]) customMpsOverrides[prodId] = [0, 0, 0, 0];
+                customMpsOverrides[prodId][weekIndex] = newProdQty;
+            }
+        });
+    }
+
+    saveData();
+    refreshAppUI();
+    renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
+    runProductionFlow();
+    showNotification(`Total de ${titles[type]} actualizado.`, 'success');
+}
+
+window.editGlobalVolume = editGlobalVolume;
+
 function editWeeklyVolumeTableValue(type, weekIndex) {
+    const select = document.getElementById('weekly-edit-product');
+    const productId = select ? parseInt(select.value) : null;
+    if (!productId || isNaN(productId)) {
+        showNotification('Por favor, selecciona un sabor de cerveza primero.', 'error');
+        return;
+    }
+
     let currentVal = 0;
     let label = "";
     if (type === 'barril') {
-        currentVal = customWeeklyBarrilDemand[weekIndex];
-        label = "Pedidos fijos — Barril (L)";
+        currentVal = (customWeeklyBarrilDemand[productId] && customWeeklyBarrilDemand[productId][weekIndex] !== undefined)
+            ? customWeeklyBarrilDemand[productId][weekIndex]
+            : 0;
+        label = "Pedidos fijos — Barril (L)";
     } else if (type === 'overflow_bottles') {
-        currentVal = customWeeklyOverflowBottles[weekIndex];
+        currentVal = customWeeklyOverflowBottles[weekIndex] || 0;
         label = "Overflow (L)";
     } else if (type === 'forecast') {
-        currentVal = customWeeklyForecastLiters[weekIndex];
+        currentVal = (customWeeklyForecastLiters[productId] && customWeeklyForecastLiters[productId][weekIndex] !== undefined)
+            ? customWeeklyForecastLiters[productId][weekIndex]
+            : 0;
         label = "Producción según pronósticos (L)";
     }
 
@@ -1991,12 +2412,14 @@ function editWeeklyVolumeTableValue(type, weekIndex) {
     }
 
     if (type === 'barril') {
-        customWeeklyBarrilDemand[weekIndex] = newVal;
+        if (!customWeeklyBarrilDemand[productId]) customWeeklyBarrilDemand[productId] = [0, 0, 0, 0];
+        customWeeklyBarrilDemand[productId][weekIndex] = newVal;
     } else if (type === 'overflow_bottles') {
         customWeeklyOverflowBottles[weekIndex] = newVal;
         customWeeklyOverflowLiters[weekIndex] = newVal * systemParameters.tamanoBotella;
     } else if (type === 'forecast') {
-        customWeeklyForecastLiters[weekIndex] = newVal;
+        if (!customWeeklyForecastLiters[productId]) customWeeklyForecastLiters[productId] = [0, 0, 0, 0];
+        customWeeklyForecastLiters[productId][weekIndex] = newVal;
     }
 
     saveData();
@@ -2064,13 +2487,15 @@ function saveData() {
         customWeeklyOverflowBottles,
         customWeeklyOverflowLiters,
         weeklyDemandOverridesActive,
+        customMpsOverrides,
         systemParameters
     };
     saveState(state);
 }
 
 function refreshAppUI() {
-    window._mpsMrpCalculated = false;
+    const wasCalculated = window._mpsMrpCalculated;
+    window._mpsMrpCalculated = wasCalculated; // Preserve previous state
     loadClients();
     loadSuppliers();
     loadInventory();
@@ -2089,7 +2514,11 @@ function refreshAppUI() {
     renderTrackingActive();
     renderTrackingHistory();
 
-    runProductionFlow();
+    if (wasCalculated) {
+        runProductionFlow(true);
+    } else {
+        runProductionFlow();
+    }
 
     if (!document.getElementById('tab-semanal')?.classList.contains('hidden')) {
         renderWeeklyProductionTab();
@@ -2216,7 +2645,7 @@ function openTankInfoModal(id) {
 }
 
 function deleteActiveProduction(tankId, scheduleIdx) {
-    if (!confirm('ATENCIÓN: ¿Deseas CANCELAR esta producción? Se vaciará el tanque pero NO se recuperará la materia prima.')) return;
+    if (!confirm('ATENCIÃƒâ€œN: ¿Deseas CANCELAR esta producción? Se vaciará el tanque pero NO se recuperará la materia prima.')) return;
     const tank = tanks.find(t => t.id === tankId);
     const schedule = tank.schedule[scheduleIdx];
 
@@ -2246,12 +2675,14 @@ function renderTrackingHistory() {
     if (!container) return;
     container.innerHTML = '';
 
-    if (!productionHistory || productionHistory.length === 0) {
+    const finishedHistory = productionHistory.filter(hist => !hist.isActive);
+
+    if (!finishedHistory || finishedHistory.length === 0) {
         container.innerHTML = '<p class="text-gray-500 italic p-4 text-center border rounded">No hay historial de producciones terminadas.</p>';
         return;
     }
 
-    productionHistory.forEach(hist => {
+    finishedHistory.forEach(hist => {
         const prod = inventory.find(p => p.id === hist.productId);
         const div = document.createElement('div');
         div.className = 'p-3 border-b border-gray-100 hover:bg-gray-50 text-sm flex justify-between items-center';
@@ -2395,33 +2826,36 @@ function saveTankSchedule(event) {
     closeTankScheduleModal();
     showNotification(isEdit ? 'Lote actualizado correctamente.' : 'Tanque llenado manualmente.', 'success');
 }
-// --- NUEVA LÓGICA DE PRODUCCIÓN (TABS, WIZARD Y SEGUIMIENTO) ---
+// --- NUEVA LÃƒâ€œGICA DE PRODUCCIÃƒâ€œN (TABS, WIZARD Y SEGUIMIENTO) ---
 
 function switchProductionTab(tabId) {
     const tabNueva = document.getElementById('tab-nueva');
     const tabSeguimiento = document.getElementById('tab-seguimiento');
     const tabSemanal = document.getElementById('tab-semanal');
     const tabPlaneacion = document.getElementById('tab-planeacion');
+    const tabMrp = document.getElementById('tab-mrp');
+
     const btnNueva = document.getElementById('tab-btn-nueva');
     const btnSeguimiento = document.getElementById('tab-btn-seguimiento');
     const btnSemanal = document.getElementById('tab-btn-semanal');
     const btnPlaneacion = document.getElementById('tab-btn-planeacion');
+    const btnMrp = document.getElementById('tab-btn-mrp');
 
     if (tabNueva) tabNueva.classList.add('hidden');
     if (tabSeguimiento) tabSeguimiento.classList.add('hidden');
     if (tabSemanal) tabSemanal.classList.add('hidden');
     if (tabPlaneacion) tabPlaneacion.classList.add('hidden');
+    if (tabMrp) tabMrp.classList.add('hidden');
 
     if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSeguimiento) btnSeguimiento.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnSemanal) btnSemanal.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
     if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
+    if (btnMrp) btnMrp.className = 'py-2 px-6 font-bold text-gray-500 hover:text-[#005B3A] border-b-2 border-transparent hover:border-gray-300 transition-all';
 
     if (tabId === 'nueva') {
         if (tabNueva) tabNueva.classList.remove('hidden');
         if (btnNueva) btnNueva.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
-        updateWizardProductSelect();
-        updateWizardTankSelect();
     } else if (tabId === 'seguimiento') {
         if (tabSeguimiento) tabSeguimiento.classList.remove('hidden');
         if (btnSeguimiento) btnSeguimiento.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
@@ -2436,6 +2870,9 @@ function switchProductionTab(tabId) {
         if (tabPlaneacion) tabPlaneacion.classList.remove('hidden');
         if (btnPlaneacion) btnPlaneacion.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
         runProductionFlow();
+    } else if (tabId === 'mrp') {
+        if (tabMrp) tabMrp.classList.remove('hidden');
+        if (btnMrp) btnMrp.className = 'py-2 px-6 font-bold text-[#005B3A] border-b-2 border-[#005B3A]';
     }
 }
 
@@ -2485,13 +2922,50 @@ function renderWeeklyDemandAdjustment() {
     const container = document.getElementById('weekly-demand-adjustment-table');
     if (!container) return;
 
-    const computed = computeWeeklyDemandFromOrders();
-    const displayBarril = weeklyDemandOverridesActive ? customWeeklyBarrilDemand : computed.barril;
-    const displayForecast = weeklyDemandOverridesActive ? customWeeklyForecastLiters : computed.forecastL;
+    const select = document.getElementById('weekly-edit-product');
+    const productId = select ? parseInt(select.value) : null;
+
+    if (!productId || isNaN(productId)) {
+        let optionsHtml = '<option value="">-- Selecciona un sabor --</option>';
+        inventory.filter(p => p.type !== 'raw').forEach(p => {
+            optionsHtml += `<option value="${p.id}">${p.name} (${p.sku})</option>`;
+        });
+
+        container.innerHTML = `
+            <div class="p-6 text-center text-amber-700 bg-amber-50 border border-amber-200 rounded-xl font-medium">
+                <div class="flex items-center justify-center gap-2 mb-3">
+                    <i class="fas fa-exclamation-circle text-xl text-amber-500"></i>
+                    <span class="text-base font-bold text-gray-800">No se ha seleccionado sabor de cerveza</span>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Por favor, selecciona un sabor de cerveza para ver y ajustar su demanda semanal:</p>
+                <div class="max-w-xs mx-auto">
+                    <select onchange="const mainSel = document.getElementById('weekly-edit-product'); if(mainSel){ mainSel.value = this.value; mainSel.dispatchEvent(new Event('change')); }" class="w-full p-2 border border-gray-300 rounded-md bg-white text-gray-700 shadow-sm focus:ring-2 focus:ring-[#005B3A] focus:outline-none font-semibold text-sm">
+                        ${optionsHtml}
+                    </select>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const product = inventory.find(p => p.id === productId);
+    if (!product) return;
+
+    const computedForProduct = computeWeeklyDemandForProduct(productId);
+
+    if (!customWeeklyBarrilDemand[productId]) {
+        customWeeklyBarrilDemand[productId] = [...computedForProduct.barril];
+    }
+    if (!customWeeklyForecastLiters[productId]) {
+        customWeeklyForecastLiters[productId] = [...computedForProduct.forecastL];
+    }
+
+    const displayBarril = customWeeklyBarrilDemand[productId];
+    const displayForecast = customWeeklyForecastLiters[productId];
 
     const statusLabel = weeklyDemandOverridesActive
-        ? '<span class="text-xs font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">Usando valores guardados en MPS/MRP</span>'
-        : '<span class="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-1 rounded">Vista desde pedidos/pronósticos — guarda para fijar valores manuales</span>';
+        ? `<span class="text-xs font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">Usando valores guardados en MPS/MRP para ${product.name}</span>`
+        : `<span class="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-1 rounded">Vista desde pedidos/pronósticos para ${product.name} — guarda para fijar valores manuales</span>`;
 
     let html = `<div class="mb-3">${statusLabel}</div>
         <table class="w-full text-left border-collapse border border-gray-200 text-sm">
@@ -2506,8 +2980,11 @@ function renderWeeklyDemandAdjustment() {
             <tbody>`;
 
     for (let w = 0; w < 4; w++) {
-        const pedidos = customWeeklyBarrilDemand[w] ?? 0;
-        const pronostico = customWeeklyForecastLiters[w] ?? 0;
+        const pedidos = displayBarril[w] || 0;
+        const pronostico = displayForecast[w] || 0;
+        // Forzar conversión a número al mostrar totales para evitar concatenación de strings
+        const pedidosNum = Number(pedidos) || 0;
+        const pronosticoNum = Number(pronostico) || 0;
         html += `<tr>
             <td class="p-2 border font-semibold">${getWeekLabel(getDateForWeekOffset(w))}</td>
             <td class="p-2 border text-center">
@@ -2518,7 +2995,7 @@ function renderWeeklyDemandAdjustment() {
                 <input type="number" min="0" step="0.01" id="weekly-demand-pronostico-${w}"
                     value="${pronostico}" class="w-full max-w-[140px] mx-auto p-2 border border-gray-300 rounded-md text-center focus:ring-2 focus:ring-[#005B3A]">
             </td>
-            <td class="p-2 border text-center font-bold text-gray-700" id="weekly-demand-total-${w}">${formatDecimal(pedidos + pronostico)} L</td>
+            <td class="p-2 border text-center font-bold text-gray-700" id="weekly-demand-total-${w}">${formatDecimal(pedidosNum + pronosticoNum)} L</td>
         </tr>`;
     }
 
@@ -2563,18 +3040,32 @@ function renderWeeklyDemandAdjustment() {
 }
 
 function saveWeeklyDemandAdjustment() {
+    const select = document.getElementById('weekly-edit-product');
+    const productId = select ? parseInt(select.value) : null;
+    if (!productId || isNaN(productId)) {
+        showNotification('Por favor, selecciona un sabor de cerveza primero.', 'error');
+        return;
+    }
+
+    if (!customWeeklyBarrilDemand[productId]) {
+        customWeeklyBarrilDemand[productId] = [0, 0, 0, 0];
+    }
+    if (!customWeeklyForecastLiters[productId]) {
+        customWeeklyForecastLiters[productId] = [0, 0, 0, 0];
+    }
+
     for (let w = 0; w < 4; w++) {
         const pedidos = document.getElementById(`weekly-demand-pedidos-${w}`);
         const pronostico = document.getElementById(`weekly-demand-pronostico-${w}`);
         const newVal = Math.max(0, parseFloat(pedidos?.value) || 0);
         const newForecast = Math.max(0, parseFloat(pronostico?.value) || 0);
 
-        const oldVal = customWeeklyBarrilDemand[w] ?? 0;
-        const oldForecast = customWeeklyForecastLiters[w] ?? 0;
+        const oldVal = customWeeklyBarrilDemand[productId][w] || 0;
+        const oldForecast = customWeeklyForecastLiters[productId][w] || 0;
 
         if (newVal !== oldVal || newForecast !== oldForecast) {
-            customWeeklyBarrilDemand[w] = newVal;
-            customWeeklyForecastLiters[w] = newForecast;
+            customWeeklyBarrilDemand[productId][w] = newVal;
+            customWeeklyForecastLiters[productId][w] = newForecast;
             syncActiveProductionToDemand(w);
         }
     }
@@ -2583,19 +3074,26 @@ function saveWeeklyDemandAdjustment() {
     renderWeeklyDemandAdjustment();
     renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
-    showNotification('Demanda semanal guardada. Las tablas MPS/MRP se actualizaron.', 'success');
+    showNotification('Demanda semanal guardada para el producto seleccionado. Las tablas MPS/MRP se actualizaron.', 'success');
 }
 
 function importWeeklyDemandFromOrders() {
-    const computed = computeWeeklyDemandFromOrders();
-    customWeeklyBarrilDemand = [...computed.barril];
-    customWeeklyForecastLiters = [...computed.forecastL];
+    const select = document.getElementById('weekly-edit-product');
+    const productId = select ? parseInt(select.value) : null;
+    if (!productId || isNaN(productId)) {
+        showNotification('Por favor, selecciona un sabor de cerveza primero.', 'error');
+        return;
+    }
+
+    const computed = computeWeeklyDemandForProduct(productId);
+    customWeeklyBarrilDemand[productId] = [...computed.barril];
+    customWeeklyForecastLiters[productId] = [...computed.forecastL];
     weeklyDemandOverridesActive = true;
     saveData();
     renderWeeklyDemandAdjustment();
     renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
     runProductionFlow();
-    showNotification('Valores importados desde pedidos fijos y pronósticos registrados.', 'success');
+    showNotification('Valores importados para el sabor seleccionado.', 'success');
 }
 
 function renderWeeklyDemandList() {
@@ -2664,14 +3162,16 @@ function renderWeeklyDemandList() {
 
 function deleteDemand(id, type) {
     if (!confirm('¿Seguro deseas eliminar este registro?')) return;
-    
+
     let deletedLiters = 0;
     let deletedWeekIndex = 0;
-    
+    let productId = null;
+
     if (type === 'order') {
         const o = orders.find(x => x.id === id);
         if (o) {
             const prod = inventory.find(p => p.id === o.productId);
+            productId = o.productId;
             deletedLiters = o.qty * getProductVolumePerUnit(prod);
             deletedWeekIndex = getWeekIndexFromToday(o.dueDate);
             orders = orders.filter(x => x.id !== id);
@@ -2680,6 +3180,7 @@ function deleteDemand(id, type) {
         const f = forecasts.find(x => x.id === id);
         if (f) {
             const prod = inventory.find(p => p.id === f.productId);
+            productId = f.productId;
             deletedLiters = f.qty * getProductVolumePerUnit(prod);
             deletedWeekIndex = getWeekIndexFromToday(f.targetDate);
             forecasts = forecasts.filter(x => x.id !== id);
@@ -2687,11 +3188,15 @@ function deleteDemand(id, type) {
     }
 
     // Sync manual overrides if active
-    if (weeklyDemandOverridesActive) {
+    if (weeklyDemandOverridesActive && productId) {
         if (type === 'order') {
-            customWeeklyBarrilDemand[deletedWeekIndex] = Math.max(0, customWeeklyBarrilDemand[deletedWeekIndex] - deletedLiters);
+            if (customWeeklyBarrilDemand[productId]) {
+                customWeeklyBarrilDemand[productId][deletedWeekIndex] = Math.max(0, (customWeeklyBarrilDemand[productId][deletedWeekIndex] || 0) - deletedLiters);
+            }
         } else {
-            customWeeklyForecastLiters[deletedWeekIndex] = Math.max(0, customWeeklyForecastLiters[deletedWeekIndex] - deletedLiters);
+            if (customWeeklyForecastLiters[productId]) {
+                customWeeklyForecastLiters[productId][deletedWeekIndex] = Math.max(0, (customWeeklyForecastLiters[productId][deletedWeekIndex] || 0) - deletedLiters);
+            }
         }
     }
 
@@ -2758,35 +3263,32 @@ function saveDemandEdit(event) {
     // Calculate changes for overrides
     const diffLiters = qtyLiters - oldQtyLiters;
     const oldWeekIndex = getWeekIndexFromToday(type === 'order' ? item.dueDate : item.targetDate);
-    const newWeekIndex = getWeekIndexFromToday(date);
+    const newWeekIndex = getWe    // Sync manual overrides if active
+    if (weeklyDemandOverridesActive && productId) {
+        if (!customWeeklyBarrilDemand[productId]) {
+            customWeeklyBarrilDemand[productId] = [0, 0, 0, 0];
+        }
+        if (!customWeeklyForecastLiters[productId]) {
+            customWeeklyForecastLiters[productId] = [0, 0, 0, 0];
+        }
 
-    item.qty = qtyLiters / unitVolume;
-    if (type === 'order') {
-        item.dueDate = date;
-    } else {
-        item.targetDate = date;
-    }
-
-    // Sync manual overrides if active
-    if (weeklyDemandOverridesActive) {
         if (oldWeekIndex === newWeekIndex) {
             if (type === 'order') {
-                customWeeklyBarrilDemand[oldWeekIndex] = Math.max(0, customWeeklyBarrilDemand[oldWeekIndex] + diffLiters);
+                customWeeklyBarrilDemand[productId][oldWeekIndex] = Math.max(0, (customWeeklyBarrilDemand[productId][oldWeekIndex] || 0) + diffLiters);
             } else {
-                customWeeklyForecastLiters[oldWeekIndex] = Math.max(0, customWeeklyForecastLiters[oldWeekIndex] + diffLiters);
+                customWeeklyForecastLiters[productId][oldWeekIndex] = Math.max(0, (customWeeklyForecastLiters[productId][oldWeekIndex] || 0) + diffLiters);
             }
         } else {
             // Subtract old from old week, add new to new week
             if (type === 'order') {
-                customWeeklyBarrilDemand[oldWeekIndex] = Math.max(0, customWeeklyBarrilDemand[oldWeekIndex] - oldQtyLiters);
-                customWeeklyBarrilDemand[newWeekIndex] = Math.max(0, (customWeeklyBarrilDemand[newWeekIndex] || 0) + qtyLiters);
+                customWeeklyBarrilDemand[productId][oldWeekIndex] = Math.max(0, (customWeeklyBarrilDemand[productId][oldWeekIndex] || 0) - oldQtyLiters);
+                customWeeklyBarrilDemand[productId][newWeekIndex] = Math.max(0, (customWeeklyBarrilDemand[productId][newWeekIndex] || 0) + qtyLiters);
             } else {
-                customWeeklyForecastLiters[oldWeekIndex] = Math.max(0, customWeeklyForecastLiters[oldWeekIndex] - oldQtyLiters);
-                customWeeklyForecastLiters[newWeekIndex] = Math.max(0, (customWeeklyForecastLiters[newWeekIndex] || 0) + qtyLiters);
+                customWeeklyForecastLiters[productId][oldWeekIndex] = Math.max(0, (customWeeklyForecastLiters[productId][oldWeekIndex] || 0) - oldQtyLiters);
+                customWeeklyForecastLiters[productId][newWeekIndex] = Math.max(0, (customWeeklyForecastLiters[productId][newWeekIndex] || 0) + qtyLiters);
             }
         }
     }
-
     // Sync back to production and tank schedules
     syncActiveProductionToDemand(oldWeekIndex);
     if (oldWeekIndex !== newWeekIndex) {
@@ -2970,10 +3472,12 @@ function renderForecastAdjustmentTable(container) {
     const rollingStock = { ...stockByProduct };
     const productRows = detailRows.map(row => {
         const stockAvail = rollingStock[row.productId] || 0;
-        const adjustedLiters = Math.max(0, row.forecastLiters - stockAvail);
+        const adjustedLiters = Math.max(0, row.forecastLiters - stockAvail); // producción requerida
+        const deficitLiters = stockAvail - row.forecastLiters; // puede ser negativo
         const covers = row.forecastLiters > 0 && stockAvail >= row.forecastLiters;
-        rollingStock[row.productId] = Math.max(0, stockAvail - row.forecastLiters);
-        return { ...row, stockLiters: stockAvail, adjustedLiters, covers };
+        // permitir que el stock decrezca (puede quedar negativo) para mostrar déficit
+        rollingStock[row.productId] = stockAvail - row.forecastLiters;
+        return { ...row, stockLiters: stockAvail, adjustedLiters, covers, deficitLiters };
     });
 
     const weeklyForecastL = getWeeklyForecastLitersForPlanning();
@@ -2984,7 +3488,8 @@ function renderForecastAdjustmentTable(container) {
         const stockBefore = rollingInvGlobal;
         const adjustedL = Math.max(0, forecastL - stockBefore);
         const covers = forecastL > 0 && stockBefore >= forecastL;
-        rollingInvGlobal = Math.max(0, stockBefore - forecastL);
+        // Permitir inventario negativo para reflejar déficit proyectado
+        rollingInvGlobal = stockBefore - forecastL;
         return {
             weekLabel: `Semana ${w + 1}`,
             forecastL,
@@ -3013,13 +3518,16 @@ function renderForecastAdjustmentTable(container) {
             </thead>
             <tbody>`;
         productRows.forEach(row => {
+            const stateHtml = row.deficitLiters < 0
+                ? `<span class="text-red-600 font-bold">Déficit: ${formatDecimal(Math.abs(row.deficitLiters))} L</span>`
+                : (row.covers ? '<span class="text-blue-600 font-semibold">Inv. cubre demanda</span>' : (row.forecastLiters > 0 ? 'Requiere producción' : '—'));
             html += `<tr>
                 <td class="p-2 border font-semibold">${row.weekLabel}</td>
                 <td class="p-2 border">${row.productName}</td>
                 <td class="p-2 border text-center">${formatDecimal(row.forecastLiters)} L<br><span class="text-xs text-gray-500">${formatDecimal(row.forecastUnits)} und</span></td>
                 <td class="p-2 border text-center">${formatDecimal(row.stockLiters)} L</td>
                 <td class="p-2 border text-center font-semibold ${row.covers ? 'text-blue-600' : 'text-amber-700'}">${formatDecimal(row.adjustedLiters)} L</td>
-                <td class="p-2 border text-center text-xs">${row.covers ? '<span class="text-blue-600 font-semibold">Inv. cubre demanda</span>' : (row.forecastLiters > 0 ? 'Requiere producción' : '—')}</td>
+                <td class="p-2 border text-center text-xs">${stateHtml}</td>
                 <td class="p-2 border text-center text-xs">${row.targetDate}</td>
                 <td class="p-2 border text-center">
                     <button type="button" onclick="deleteForecasts([${row.ids.join(',')}])" class="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-semibold transition-all">
@@ -3061,7 +3569,7 @@ function renderForecastAdjustmentTable(container) {
             <td class="p-2 border">Total mes</td>
             <td class="p-2 border text-center">${formatDecimal(totalForecast)} L</td>
             <td class="p-2 border text-center">${formatDecimal(initialInvLiters)} L</td>
-            <td class="p-2 border text-center">—</td>
+            <td class="p-2 border text-center">—</td>
             <td class="p-2 border text-center">${litersToBottles(initialInvLiters)} bot</td>
             <td class="p-2 border text-center text-xs text-gray-500">Inventario inicial PT</td>
         </tr>
@@ -3085,7 +3593,9 @@ function deleteForecasts(ids) {
                 const liters = f.qty * getProductVolumePerUnit(product);
                 const w = getWeekIndexFromToday(f.targetDate);
                 if (w >= 0 && w <= 3) {
-                    customWeeklyForecastLiters[w] = Math.max(0, customWeeklyForecastLiters[w] - liters);
+                    if (customWeeklyForecastLiters[f.productId]) {
+                        customWeeklyForecastLiters[f.productId][w] = Math.max(0, (customWeeklyForecastLiters[f.productId][w] || 0) - liters);
+                    }
                 }
             }
         });
@@ -3102,7 +3612,7 @@ function updateWeeklyProductionProductSelect() {
     const select = document.getElementById('weekly-edit-product');
     if (!select) return;
     const currentValue = select.value;
-    select.innerHTML = '<option value="">-- Selecciona producto --</option>';
+    select.innerHTML = '<option value="">-- Selecciona sabor o receta --</option>';
     inventory.filter(p => p.type !== 'raw').forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
@@ -3215,10 +3725,15 @@ function syncActiveProductionToDemand(weekIndex) {
     if (weekIndex < 0 || weekIndex > 3) return;
     const entry = productionHistory.find(hist => getWeekIndexForHistoryEntry(hist) === weekIndex && hist.isActive === true);
     if (entry) {
-        const product = inventory.find(p => p.id === entry.productId);
+        const productId = entry.productId;
+        const product = inventory.find(p => p.id === productId);
+        if (!product) return;
         const unitVolume = getProductVolumePerUnit(product);
-        const newVal = customWeeklyBarrilDemand[weekIndex];
-        
+
+        const newVal = (customWeeklyBarrilDemand[productId] && customWeeklyBarrilDemand[productId][weekIndex] !== undefined)
+            ? customWeeklyBarrilDemand[productId][weekIndex]
+            : (computeWeeklyDemandForProduct(productId).barril[weekIndex] || 0);
+
         // 1. Update production entry fixed orders
         entry.fixedOrders = newVal;
 
@@ -3227,31 +3742,32 @@ function syncActiveProductionToDemand(weekIndex) {
         entry.overflowLiters = overflow;
         entry.overflowBottles = Math.floor(overflow / unitVolume);
 
-        // 2. Update tank schedule (qty remains equal to total qtyLiters, so no change to sched.qty)
-
-        // 3. Update the corresponding order in orders array!
-        const order = orders.find(o => o.productId === entry.productId && getWeekIndexFromToday(o.dueDate) === weekIndex);
+        // 2. Update the corresponding order in orders array!
+        const order = orders.find(o => o.productId === productId && getWeekIndexFromToday(o.dueDate) === weekIndex);
         if (order) {
             order.qty = newVal / unitVolume;
         } else if (newVal > 0) {
             orders.push({
                 id: Date.now(),
-                productId: entry.productId,
+                productId: productId,
                 qty: newVal / unitVolume,
                 dueDate: entry.startDate || getLocalDateStr(),
                 createdAt: new Date().toISOString()
             });
         }
 
-        // 4. Update the corresponding forecast in forecasts array!
-        const forecastVal = customWeeklyForecastLiters[weekIndex];
-        const forecastItem = forecasts.find(f => f.productId === entry.productId && getWeekIndexFromToday(f.targetDate) === weekIndex);
+        // 3. Update the corresponding forecast in forecasts array!
+        const forecastVal = (customWeeklyForecastLiters[productId] && customWeeklyForecastLiters[productId][weekIndex] !== undefined)
+            ? customWeeklyForecastLiters[productId][weekIndex]
+            : (computeWeeklyDemandForProduct(productId).forecastL[weekIndex] || 0);
+
+        const forecastItem = forecasts.find(f => f.productId === productId && getWeekIndexFromToday(f.targetDate) === weekIndex);
         if (forecastItem) {
             forecastItem.qty = forecastVal / unitVolume;
         } else if (forecastVal > 0) {
             forecasts.push({
                 id: Date.now() + 1,
-                productId: entry.productId,
+                productId: productId,
                 qty: forecastVal / unitVolume,
                 targetDate: entry.startDate || getLocalDateStr()
             });
@@ -3268,8 +3784,15 @@ function applyWeeklyLitersSplitToDemand(productId, weekIndex, totalLiters, fixed
     if (!product || product.type === 'raw') return;
     const unitVolume = getProductVolumePerUnit(product);
 
-    customWeeklyBarrilDemand[weekIndex] = Math.max(0, (Number(customWeeklyBarrilDemand[weekIndex]) || 0) - previousFixed + fixedLiters);
-    customWeeklyForecastLiters[weekIndex] = Math.max(0, (Number(customWeeklyForecastLiters[weekIndex]) || 0) - previousForecast + forecastLiters);
+    if (!customWeeklyBarrilDemand[productId]) {
+        customWeeklyBarrilDemand[productId] = [0, 0, 0, 0];
+    }
+    if (!customWeeklyForecastLiters[productId]) {
+        customWeeklyForecastLiters[productId] = [0, 0, 0, 0];
+    }
+
+    customWeeklyBarrilDemand[productId][weekIndex] = Math.max(0, (Number(customWeeklyBarrilDemand[productId][weekIndex]) || 0) - previousFixed + fixedLiters);
+    customWeeklyForecastLiters[productId][weekIndex] = Math.max(0, (Number(customWeeklyForecastLiters[productId][weekIndex]) || 0) - previousForecast + forecastLiters);
     weeklyDemandOverridesActive = true;
 
     orders = orders.filter(o => {
@@ -3310,6 +3833,7 @@ function resetWeeklyProductionForm() {
     document.getElementById('weekly-edit-fixed-liters').value = '';
     document.getElementById('weekly-edit-units').value = '';
     updateWeeklyLitersSplitPreview();
+    renderWeeklyDemandAdjustment();
 
     const statusDiv = document.getElementById('weekly-mrp-status');
     if (statusDiv) {
@@ -3346,6 +3870,7 @@ function editWeeklyProductionEntry(entryId) {
     document.getElementById('weekly-edit-fixed-liters').value = formatDecimal(fixedL);
     document.getElementById('weekly-edit-units').value = formatDecimal(entry.qtyUnits);
     updateWeeklyLitersSplitPreview();
+    renderWeeklyDemandAdjustment();
 
     updateWeeklyEditTankSelect();
     document.getElementById('weekly-edit-tank').value = entry.tankName || '';
@@ -3398,8 +3923,10 @@ function deleteWeeklyProductionEntry(entryId) {
     productionHistory = productionHistory.filter(hist => hist.id !== entryId);
 
     if (wIdx >= 0 && wIdx <= 3) {
-        customWeeklyBarrilDemand[wIdx] = 0;
-        customWeeklyForecastLiters[wIdx] = 0;
+        if (prodId !== -1) {
+            if (customWeeklyBarrilDemand[prodId]) customWeeklyBarrilDemand[prodId][wIdx] = 0;
+            if (customWeeklyForecastLiters[prodId]) customWeeklyForecastLiters[prodId][wIdx] = 0;
+        }
         customWeeklyOverflowLiters[wIdx] = 0;
         customWeeklyOverflowBottles[wIdx] = 0;
 
@@ -3443,6 +3970,11 @@ function weeklyProductionCheckIngredients() {
         return false;
     }
 
+    const MRP_EXCL_W = ['botella', 'botellas', 'tapa', 'tapas', 'agua'];
+    const isMrpExcludedW = (name) => {
+        const n = (name || '').toLowerCase().trim();
+        return MRP_EXCL_W.some(excl => n === excl || n.startsWith(excl + ' ') || n.endsWith(' ' + excl) || n.includes(' ' + excl + ' '));
+    };
     let allAvailable = true;
     let missingItems = [];
     let html = '<ul class="space-y-1 text-sm">';
@@ -3450,7 +3982,7 @@ function weeklyProductionCheckIngredients() {
 
     recipe.ingredients.forEach(ing => {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
-        if (raw) {
+        if (raw && !isMrpExcludedW(raw.name)) {
             const reqQty = ing.qtyPerUnit * qty;
             const hasEnough = raw.quantity >= reqQty;
             if (!hasEnough) {
@@ -3471,7 +4003,7 @@ function weeklyProductionCheckIngredients() {
                 <label class="block text-sm font-semibold text-gray-700 mb-1">Selecciona el ingrediente faltante para revisar o ajustar</label>
                 <div class="flex gap-2 mb-3 flex-wrap">
                     <select id="weekly-missing-item-select" class="p-2 border border-gray-300 rounded-md flex-1 text-sm bg-white">
-                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
+                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
                     </select>
                     <button type="button" onclick="openSelectedWeeklyRawItem()" class="px-3 py-2 bg-[#005B3A] text-white rounded-md text-sm hover:bg-[#00422a]">Editar seleccionado</button>
                 </div>
@@ -3679,10 +4211,11 @@ function startWeeklyProductionActive() {
     applyWeeklyLitersSplitToDemand(prodId, weekIndex, litersToFerment, fixedOrders, forecastLitersValue, dateInput, previousTotal, previousFixed, previousForecast);
 
     saveData();
+    window._mpsMrpCalculated = true;
     refreshAppUI();
     renderWeeklyDemandAdjustment();
     renderForecastAdjustmentTable(document.getElementById('forecast-adjustment-table'));
-    runProductionFlow();
+    runProductionFlow(true);
     resetWeeklyProductionForm();
 }
 
@@ -3753,6 +4286,11 @@ function wizardCheckIngredients() {
         return false;
     }
 
+    const MRP_EXCL = ['botella', 'botellas', 'tapa', 'tapas', 'agua'];
+    const isMrpExcluded = (name) => {
+        const n = (name || '').toLowerCase().trim();
+        return MRP_EXCL.some(excl => n === excl || n.startsWith(excl + ' ') || n.endsWith(' ' + excl) || n.includes(' ' + excl + ' '));
+    };
     let allAvailable = true;
     let missingItems = [];
     let html = '<ul class="space-y-1 text-sm">';
@@ -3761,7 +4299,7 @@ function wizardCheckIngredients() {
 
     recipe.ingredients.forEach(ing => {
         const raw = inventory.find(p => p.id === ing.ingredientProductId);
-        if (raw) {
+        if (raw && !isMrpExcluded(raw.name)) {
             const reqQty = ing.qtyPerUnit * totalVolume;
             const hasEnough = raw.quantity >= reqQty;
             if (!hasEnough) {
@@ -3782,7 +4320,7 @@ function wizardCheckIngredients() {
                 <label class="block text-sm font-semibold text-gray-700 mb-1">Selecciona el ingrediente faltante para revisar o ajustar</label>
                 <div class="flex gap-2 mb-3 flex-wrap">
                     <select id="wizard-missing-item-select" class="p-2 border border-gray-300 rounded-md flex-1 text-sm">
-                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
+                        ${missingItems.map(item => `<option value="${item.raw.id}|${item.reqQty}">${item.raw.name} — Req. ${formatDecimal(item.reqQty)} / Stock: ${formatDecimal(item.raw.quantity)}</option>`).join('')}
                     </select>
                     <button type="button" onclick="openSelectedWizardRawItem()" class="px-3 py-2 bg-[#005B3A] text-white rounded-md text-sm hover:bg-[#00422a]">Editar seleccionado</button>
                 </div>
@@ -4059,7 +4597,7 @@ function updateCapacidadSemanalSugerida() {
     const sugerido = Production.calcularCapacidadTotal(tanques, capacidad);
     const label = document.getElementById('sugerido-capacidad-semanal');
     if (label) {
-        label.textContent = `Sugerido: ${sugerido} L (Tanques × Capacidad)`;
+        label.textContent = `Sugerido: ${sugerido} L (Tanques Ãƒâ€” Capacidad)`;
     }
 }
 
@@ -4177,6 +4715,8 @@ window.loadTanks = loadTanks;
 window.deleteTank = deleteTank;
 window.runProductionFlow = runProductionFlow;
 window.editPlanningDemand = editPlanningDemand;
+window.closeMpsCellEditModal = closeMpsCellEditModal;
+window.saveMpsCellEdit = saveMpsCellEdit;
 window.editWeeklyCapacity = editWeeklyCapacity;
 window.editWeeklyVolumeTableValue = editWeeklyVolumeTableValue;
 window.openNotificationsModal = openNotificationsModal;
@@ -4210,9 +4750,24 @@ window.deleteDemand = deleteDemand;
 window.openDemandEditModal = openDemandEditModal;
 window.closeDemandEditModal = closeDemandEditModal;
 window.saveDemandEdit = saveDemandEdit;
+window.renderWeeklyDemandAdjustment = renderWeeklyDemandAdjustment;
 
 // Exponer funciones del módulo de parámetros generales
 window.loadSystemParametersForm = loadSystemParametersForm;
 window.updateCapacidadSemanalSugerida = updateCapacidadSemanalSugerida;
 window.saveSystemParametersForm = saveSystemParametersForm;
 window.resetDefaultParameters = resetDefaultParameters;
+
+
+
+
+
+
+
+
+
+
+
+
+
+

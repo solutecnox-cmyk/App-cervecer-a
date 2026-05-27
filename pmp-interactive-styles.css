@@ -1,0 +1,369 @@
+/**
+ * pmp-interactive-styles.css
+ * Estilos para la tabla interactiva del Programa Maestro de Producción (PMP)
+ */
+
+/* Contenedor principal de la tabla */
+.pmp-table-wrapper {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e5e7eb;
+}
+
+/* Tabla base */
+.pmp-interactive-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: white;
+    font-size: 14px;
+}
+
+/* Headers */
+.pmp-interactive-table thead {
+    background: linear-gradient(135deg, #005B3A 0%, #00422a 100%);
+    color: white;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.pmp-interactive-table thead th {
+    padding: 14px 12px;
+    text-align: center;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    vertical-align: middle;
+}
+
+.pmp-interactive-table thead th:last-child {
+    border-right: none;
+}
+
+.pmp-week-header {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.pmp-col-header {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 10px 8px;
+}
+
+/* Filas del cuerpo */
+.pmp-interactive-table tbody tr {
+    border-bottom: 1px solid #e5e7eb;
+    transition: background-color 0.2s ease;
+}
+
+.pmp-interactive-table tbody tr:hover {
+    background-color: #f9fafb;
+}
+
+.pmp-interactive-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+/* Celdas */
+.pmp-interactive-table tbody td {
+    padding: 10px 8px;
+    text-align: center;
+    border-right: 1px solid #f3f4f6;
+}
+
+.pmp-interactive-table tbody td:last-child {
+    border-right: none;
+}
+
+/* Celda del nombre del producto */
+.pmp-product-cell {
+    font-weight: 600;
+    color: #1f2937;
+    text-align: left;
+    background-color: #f3f4f6;
+    padding-left: 16px !important;
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    min-width: 160px;
+}
+
+/* ===========================
+   CELDAS EDITABLES
+   =========================== */
+.pmp-editable-cell {
+    background-color: #f0fdf4;
+    border: 2px solid #86efac;
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: text;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pmp-editable-cell:hover {
+    background-color: #dcfce7;
+    border-color: #4ade80;
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+}
+
+.pmp-editable-cell:focus-within {
+    background-color: #e0fce7;
+    border-color: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+}
+
+.pmp-editable-cell input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: #166534;
+    text-align: center;
+}
+
+.pmp-editable-cell input:focus {
+    outline: none;
+    color: #15803d;
+}
+
+.pmp-editable-cell input::placeholder {
+    color: #a7f3d0;
+}
+
+/* ===========================
+   CELDAS CALCULADAS
+   =========================== */
+.pmp-calculated-cell {
+    background-color: #fef3c7;
+    border: 2px solid #fcd34d;
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: not-allowed;
+    font-weight: 600;
+    color: #854d0e;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+}
+
+.pmp-calculated-cell:hover {
+    box-shadow: 0 0 0 2px rgba(253, 211, 77, 0.3);
+}
+
+/* Indicador de inventario negativo */
+.pmp-calculated-cell.pmp-negative-inventory {
+    background-color: #fee2e2;
+    border-color: #fca5a5;
+    color: #991b1b;
+    box-shadow: 0 0 0 2px rgba(252, 165, 165, 0.2);
+}
+
+/* ===========================
+   ESTILOS DE UTILIDAD
+   =========================== */
+
+/* Caja de información */
+.pmp-info-box {
+    background-color: #eff6ff;
+    border-left: 4px solid #0284c7;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #0c4a6e;
+    line-height: 1.5;
+}
+
+.pmp-info-box strong {
+    color: #075985;
+}
+
+/* Alerta/Advertencia */
+.pmp-warning {
+    background-color: #fee2e2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-top: 12px;
+    display: flex;
+    align-items: start;
+    gap: 10px;
+}
+
+.pmp-warning i {
+    margin-top: 2px;
+}
+
+/* ===========================
+   BOTONES
+   =========================== */
+.pmp-btn {
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.pmp-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.pmp-btn-primary {
+    background-color: #005B3A;
+    color: white;
+}
+
+.pmp-btn-primary:hover {
+    background-color: #00422a;
+}
+
+.pmp-btn-success {
+    background-color: #16a34a;
+    color: white;
+}
+
+.pmp-btn-success:hover {
+    background-color: #15803d;
+}
+
+.pmp-btn-secondary {
+    background-color: #6b7280;
+    color: white;
+}
+
+.pmp-btn-secondary:hover {
+    background-color: #4b5563;
+}
+
+.pmp-btn-export {
+    background-color: #3b82f6;
+    color: white;
+}
+
+.pmp-btn-export:hover {
+    background-color: #2563eb;
+}
+
+/* ===========================
+   RESPONSIVE
+   =========================== */
+@media (max-width: 1200px) {
+    .pmp-interactive-table {
+        font-size: 13px;
+    }
+
+    .pmp-interactive-table thead th {
+        padding: 10px 6px;
+    }
+
+    .pmp-interactive-table tbody td {
+        padding: 8px 6px;
+    }
+
+    .pmp-editable-cell,
+    .pmp-calculated-cell {
+        padding: 4px 6px;
+        font-size: 13px;
+    }
+
+    .pmp-product-cell {
+        padding-left: 12px !important;
+        min-width: 140px;
+    }
+}
+
+@media (max-width: 768px) {
+    .pmp-interactive-table {
+        font-size: 12px;
+    }
+
+    .pmp-week-header {
+        font-size: 11px;
+    }
+
+    .pmp-col-header {
+        font-size: 10px;
+        padding: 8px 4px;
+    }
+
+    .pmp-interactive-table thead th {
+        padding: 8px 4px;
+    }
+
+    .pmp-interactive-table tbody td {
+        padding: 6px 4px;
+    }
+
+    .pmp-editable-cell input {
+        font-size: 12px;
+    }
+}
+
+/* ===========================
+   MODO OSCURO (opcional)
+   =========================== */
+@media (prefers-color-scheme: dark) {
+    .pmp-table-wrapper {
+        border-color: #374151;
+    }
+
+    .pmp-interactive-table {
+        background-color: #1f2937;
+        color: #f3f4f6;
+    }
+
+    .pmp-interactive-table tbody tr:hover {
+        background-color: #111827;
+    }
+
+    .pmp-product-cell {
+        background-color: #111827;
+        color: #f3f4f6;
+    }
+
+    .pmp-interactive-table tbody td {
+        border-right-color: #374151;
+    }
+
+    .pmp-editable-cell {
+        background-color: rgba(16, 185, 129, 0.1);
+        border-color: #10b981;
+        color: #86efac;
+    }
+
+    .pmp-editable-cell input {
+        color: #86efac;
+    }
+
+    .pmp-calculated-cell {
+        background-color: rgba(251, 191, 36, 0.1);
+        border-color: #fbbf24;
+        color: #fcd34d;
+    }
+
+    .pmp-info-box {
+        background-color: rgba(2, 132, 199, 0.1);
+        border-color: #0284c7;
+        color: #7dd3fc;
+    }
+}
