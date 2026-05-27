@@ -196,6 +196,7 @@ window.renderPMPTable = Production.renderPMPTable;
 window.computePMPChainForProduct = Production.computePMPChainForProduct;
 window.calcularLotesPMP = Production.calcularLotesPMP;
 window.calcularPMPDesdeDemanda = Production.calcularPMPDesdeDemanda;
+window.calcularPMPParaCelda = Production.calcularPMPParaCelda;
 window.obtenerCantidadBaseReceta = Production.obtenerCantidadBaseReceta;
 window.calcularRequerimientoPorLitro = Production.calcularRequerimientoPorLitro;
 window.calcularRequerimientoMaterialDesdeReceta = Production.calcularRequerimientoMaterialDesdeReceta;
@@ -1594,6 +1595,23 @@ function recopilarProduccionPrevia() {
     });
 }
 
+function resolveInventarioInicialSemana(pId, w, chainedInv, prod) {
+    const overrides = customInventarioInicialOverrides[pId] || customInventarioInicialOverrides[String(pId)];
+    if (overrides && overrides[w] !== undefined && overrides[w] !== null) {
+        const ov = Number(overrides[w]) || 0;
+        // Semana 2+: ignorar override si coincide con el encadenamiento automático
+        if (w > 0 && Math.abs(ov - chainedInv) < 0.005) {
+            return chainedInv;
+        }
+        return ov;
+    }
+    return chainedInv;
+}
+
+function resolvePMPAuto(demanda, invInicial) {
+    return Production.calcularPMPDesdeDemanda(demanda, invInicial, systemParameters);
+}
+
 function calcularInventariosYPMP() {
     const engine = window.mpsEngine;
 
@@ -1602,33 +1620,34 @@ function calcularInventariosYPMP() {
         let invActual = (item.producto.quantity || 0) * getProductVolumePerUnit(item.producto);
 
         for (let w = 0; w < 4; w++) {
-            if (customInventarioInicialOverrides[pId] && customInventarioInicialOverrides[pId][w] !== undefined) {
-                invActual = Number(customInventarioInicialOverrides[pId][w]) || 0;
-            }
+            const chainedInv = invActual;
+            invActual = resolveInventarioInicialSemana(pId, w, chainedInv, item.producto);
             item.inventarioInicial[w] = invActual;
 
-            let demanda = item.demandaTotal[w];
-            let necesidadReal = demanda - invActual;
+            const demanda = item.demandaTotal[w];
+            const autoPmp = resolvePMPAuto(demanda, invActual);
+            let pmpFinal = autoPmp;
 
-            // Calculo Industrial PMP
-            let pmpCalculado = calcularLotesPMP(necesidadReal);
-
-            // Regla: Siempre respetamos al menos lo que ya estaba programado fisicamente
-            let pmpFinal = Math.max(item.produccionProgramadaPrevia[w], pmpCalculado);
-
-            // Override PMP de usuario (forzar producción)
-            if (customMpsOverrides[pId] && typeof customMpsOverrides[pId][w] !== 'undefined') {
-                pmpFinal = Number(customMpsOverrides[pId][w]) || 0;
+            const pmpOverrides = customMpsOverrides[pId] || customMpsOverrides[String(pId)];
+            if (pmpOverrides && pmpOverrides[w] !== undefined && pmpOverrides[w] !== null) {
+                const ovPmp = Number(pmpOverrides[w]) || 0;
+                const capTanque = systemParameters.capacidadTanque || 120;
+                if (Math.abs(ovPmp - autoPmp) < 0.005) {
+                    if (customMpsOverrides[pId]) customMpsOverrides[pId][w] = undefined;
+                } else if (autoPmp === 0 && ovPmp > 0 && demanda <= invActual) {
+                    if (customMpsOverrides[pId]) customMpsOverrides[pId][w] = undefined;
+                } else if (ovPmp >= capTanque && autoPmp > 0 && autoPmp < capTanque) {
+                    // Override obsoleto de tanque completo cuando aplica lote mínimo (80 L)
+                    if (customMpsOverrides[pId]) customMpsOverrides[pId][w] = undefined;
+                } else {
+                    pmpFinal = ovPmp;
+                }
             }
 
             item.pmpLotes[w] = pmpFinal;
-
-            // Inventario Final = Inicial + PMP - Demanda
             item.inventarioFinal[w] = invActual + pmpFinal - demanda;
-
             invActual = item.inventarioFinal[w];
 
-            // Totales Globales
             engine.globales.produccionSemanal[w] += pmpFinal;
             engine.globales.produccionTotal += pmpFinal;
             engine.globales.lotesSemanales[w] += Math.ceil(pmpFinal / systemParameters.capacidadTanque);
@@ -1810,7 +1829,7 @@ window.saveMpsCellEditFromModal = function() {
         if (customMpsOverrides[productId]) {
             customMpsOverrides[productId][weekIdx] = undefined;
         }
-        const autoPmp = window.computePMPChainForProduct(prod)[weekIdx].pmp;
+        const autoPmp = Production.calcularPMPDesdeDemanda(pedido + pronostico, invInicial, systemParameters);
         if (pmpRaw === '') {
             if (customMpsOverrides[productId]) {
                 const allEmpty = customMpsOverrides[productId].every(v => typeof v === 'undefined');
