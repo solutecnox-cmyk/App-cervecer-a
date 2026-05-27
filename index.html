@@ -864,7 +864,7 @@
                 <div class="mb-4">
                     <label class="block text-sm font-medium mb-1 text-gray-700">PMP / Producción Planificada (L)</label>
                     <input type="number" id="mps-cell-edit-pmp" class="w-full border border-yellow-300 rounded px-3 py-2 bg-yellow-50 text-yellow-900 font-semibold" step="0.01" min="0" placeholder="Auto" />
-                    <p class="text-xs text-gray-500 mt-1">Dejar vacío para calcular automáticamente según demanda e inventario inicial.</p>
+                    <p class="text-xs text-gray-500 mt-1">Auto: Necesidad = (Pedido + Pronóstico) − Inv. Inicial. Si ≤ 0 → 0 L; ≤ 80 L → 80 L; ≤ 120 L → 120 L.</p>
                 </div>
                 
                 <div class="mb-6">
@@ -904,25 +904,41 @@
 
         // Recalcular PMP e Inv. Final en tiempo real al tipear
         function recalcPmpModal(fromPmpField) {
+            var productId   = document.getElementById('mps-cell-edit-product-id').value;
+            var weekIndex   = parseInt(document.getElementById('mps-cell-edit-week-index').value, 10) || 0;
             var pedido      = parseFloat(document.getElementById('mps-cell-edit-pedido').value) || 0;
             var pronostico  = parseFloat(document.getElementById('mps-cell-edit-pronostico').value) || 0;
             var invInicial  = parseFloat(document.getElementById('mps-cell-edit-inventario-inicial').value) || 0;
             var pmpInput    = document.getElementById('mps-cell-edit-pmp');
             var pmpRaw      = pmpInput.value.trim();
             var demanda     = pedido + pronostico;
-            var calcPmp     = typeof window.calcularPMPDesdeDemanda === 'function'
-                ? window.calcularPMPDesdeDemanda(demanda, invInicial)
-                : (demanda <= invInicial ? 0 : 120);
+            var params      = window.systemParameters || {};
+            var calcPmp;
+
+            if (typeof window.calcularPMPParaCelda === 'function') {
+                calcPmp = window.calcularPMPParaCelda(demanda, invInicial, weekIndex, productId, params);
+            } else if (typeof window.calcularPMPDesdeDemanda === 'function') {
+                calcPmp = window.calcularPMPDesdeDemanda(demanda, invInicial, params);
+            } else if (typeof window.calcularLotesPMP === 'function') {
+                calcPmp = window.calcularLotesPMP(Math.max(0, demanda - invInicial), params);
+            } else {
+                var need = Math.max(0, demanda - invInicial);
+                var loteMin = params.loteMinimo || 80;
+                var cap = params.capacidadTanque || 120;
+                if (need <= 0) calcPmp = 0;
+                else if (need <= loteMin) calcPmp = loteMin;
+                else calcPmp = cap;
+            }
+
             var pmp;
             if (fromPmpField) {
                 pmp = pmpRaw === '' ? calcPmp : (parseFloat(pmpRaw) || 0);
             } else {
                 pmp = calcPmp;
-                pmpInput.value = pmp > 0 ? pmp : '';
+                pmpInput.value = pmp > 0 ? String(pmp) : '';
             }
-            var invFinal    = invInicial + pmp - demanda;
+            var invFinal = invInicial + pmp - demanda;
             document.getElementById('mps-cell-edit-inventario-final').value = invFinal.toFixed(2);
-            // Colorear inventario final según déficit
             var invFEl = document.getElementById('mps-cell-edit-inventario-final');
             invFEl.style.color = invFinal < 0 ? '#b91c1c' : '#92400e';
             invFEl.style.background = invFinal < 0 ? '#fef2f2' : '#fffbeb';
@@ -979,10 +995,15 @@
                 ? pmpOverrides[productoId][weekIndex]
                 : null;
             var pmpInput = document.getElementById('mps-cell-edit-pmp');
-            pmpInput.value = (pmpOverride !== null && pmpOverride !== undefined) ? pmpOverride : '';
+            var hasManualPmp = pmpOverride !== null && pmpOverride !== undefined;
+            if (hasManualPmp) {
+                pmpInput.value = pmpOverride;
+            } else {
+                pmpInput.value = '';
+            }
 
-            // Calcular y mostrar PMP e Inv. Final
-            recalcPmpModal(pmpInput.value.trim() !== '');
+            // Calcular PMP e Inv. Final (auto salvo override manual)
+            recalcPmpModal(hasManualPmp);
 
             // Mostrar nombre del producto en el título del modal
             var prod2 = prod || inv.find(function(p) { return p.id == productoId; });
