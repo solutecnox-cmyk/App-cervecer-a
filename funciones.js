@@ -646,7 +646,12 @@ function seedSampleData() {
 
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.getElementById(sectionId).classList.add('active');
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    section.classList.add('active');
+    if (sectionId === 'parametros') {
+        loadSystemParametersForm();
+    }
 }
 
 // Clientes y proveedores ahora están en módulos `clients.js` y `suppliers.js`.
@@ -4798,7 +4803,7 @@ function updateCapacidadSemanalSugerida() {
     const sugerido = Production.calcularCapacidadTotal(tanques, capacidad);
     const label = document.getElementById('sugerido-capacidad-semanal');
     if (label) {
-        label.textContent = `Sugerido: ${sugerido} L (Tanques Ãƒâ€” Capacidad)`;
+        label.textContent = 'Capacidad calculada: ' + sugerido + ' L (Tanques x Capacidad)';
     }
 }
 
@@ -4821,6 +4826,7 @@ function saveSystemParametersForm() {
     }
 
     systemParameters = {
+        ...systemParameters,
         numeroTanques: tanques,
         capacidadTanque: capacidad,
         diasFermentacion: fermentacion,
@@ -4846,7 +4852,8 @@ function resetDefaultParameters() {
             numeroSabores: 6,
             tamanoBotella: 0.33,
             horizontePlanificacion: 4,
-            barreraDemanda: 14
+            barreraDemanda: 14,
+            loteMinimo: 80
         };
         saveData();
         loadSystemParametersForm();
